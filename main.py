@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import supabase as sb
-# ── optional deps (graceful import) ──────────────────────────────────────────
+# -- optional deps (graceful import) -----------------------------------------
 try:
     import pdfplumber
     HAS_PDF = True
@@ -25,16 +25,16 @@ try:
     HAS_PPTX = True
 except ImportError:
     HAS_PPTX = False
-# ── env ───────────────────────────────────────────────────────────────────────
+# -- env ----------------------------------------------------------------------
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_KEY    = os.environ.get("OPENAI_API_KEY", "")
 SUPABASE_URL  = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY  = os.environ.get("SUPABASE_SERVICE_KEY", "")
-# ── supabase client ───────────────────────────────────────────────────────────
+# -- supabase client ----------------------------------------------------------
 supa: Optional[sb.Client] = None
 if SUPABASE_URL and SUPABASE_KEY:
     supa = sb.create_client(SUPABASE_URL, SUPABASE_KEY)
-# ── app ───────────────────────────────────────────────────────────────────────
+# -- app ----------------------------------------------------------------------
 app = FastAPI(title="CORTEX AI")
 @app.on_event("startup")
 async def startup_event():
@@ -50,7 +50,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# ── models ────────────────────────────────────────────────────────────────────
+# -- models -------------------------------------------------------------------
 class Message(BaseModel):
     role: str
     content: str
@@ -63,7 +63,7 @@ class ChatRequest(BaseModel):
     persona_id: Optional[str] = None
 class DeleteDocRequest(BaseModel):
     doc_id: str
-# ── helpers ───────────────────────────────────────────────────────────────────
+# -- helpers ------------------------------------------------------------------
 def chunk_text(text: str, size: int = 800, overlap: int = 100) -> List[str]:
     """Split text into overlapping chunks."""
     words = text.split()
@@ -76,7 +76,7 @@ def chunk_text(text: str, size: int = 800, overlap: int = 100) -> List[str]:
 async def get_embedding(text: str) -> List[float]:
     """Call OpenAI embeddings API."""
     if not OPENAI_KEY:
-        raise HTTPException(400, "OPENAI_API_KEY não configurada no servidor.")
+        raise HTTPException(400, "OPENAI_API_KEY nao configurada no servidor.")
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.post(
             "https://api.openai.com/v1/embeddings",
@@ -105,7 +105,7 @@ def extract_text(filename: str, content: bytes) -> str:
     text = ""
     if ext == "pdf":
         if not HAS_PDF:
-            raise HTTPException(400, "pdfplumber não instalado no servidor.")
+            raise HTTPException(400, "pdfplumber nao instalado no servidor.")
         with pdfplumber.open(io.BytesIO(content)) as pdf:
             for page in pdf.pages:
                 t = page.extract_text()
@@ -113,12 +113,12 @@ def extract_text(filename: str, content: bytes) -> str:
                     text += t + "\n"
     elif ext in ("docx", "doc"):
         if not HAS_DOCX:
-            raise HTTPException(400, "python-docx não instalado no servidor.")
+            raise HTTPException(400, "python-docx nao instalado no servidor.")
         doc = DocxDocument(io.BytesIO(content))
         text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
     elif ext in ("pptx", "ppt"):
         if not HAS_PPTX:
-            raise HTTPException(400, "python-pptx não instalado no servidor.")
+            raise HTTPException(400, "python-pptx nao instalado no servidor.")
         prs = Presentation(io.BytesIO(content))
         for slide in prs.slides:
             for shape in slide.shapes:
@@ -127,16 +127,16 @@ def extract_text(filename: str, content: bytes) -> str:
     elif ext == "txt":
         text = content.decode("utf-8", errors="ignore")
     else:
-        raise HTTPException(400, f"Formato '{ext}' não suportado. Use PDF, DOCX, PPTX ou TXT.")
+        raise HTTPException(400, f"Formato '{ext}' nao suportado. Use PDF, DOCX, PPTX ou TXT.")
     return text.strip()
-# ── routes ────────────────────────────────────────────────────────────────────
+# -- routes -------------------------------------------------------------------
 @app.get("/")
 async def root():
     return FileResponse("static/index.html")
 @app.get("/health")
 async def health():
     return {"status": "ok", "supabase": bool(supa)}
-# ── CHAT ─────────────────────────────────────────────────────────────────────
+# -- CHAT --------------------------------------------------------------------
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     messages = [m.dict() for m in req.messages]
@@ -156,15 +156,14 @@ async def chat(req: ChatRequest):
             )
             system_parts.append(
                 f"Use os seguintes trechos da base de conhecimento para embasar sua resposta. "
-                f"Se a resposta não estiver nos trechos, diga que não encontrou na base.\n\n"
+                f"Se a resposta nao estiver nos trechos, diga que nao encontrou na base.\n\n"
                 f"BASE DE CONHECIMENTO:\n{context}"
             )
     system_prompt = "\n\n".join(system_parts) if system_parts else None
-    # 
-── Claude ──
+    # -- Claude -
     if req.provider == "claude":
         if not ANTHROPIC_KEY:
-            raise HTTPException(400, "ANTHROPIC_API_KEY não configurada no servidor.")
+            raise HTTPException(400, "ANTHROPIC_API_KEY nao configurada no servidor.")
         body = {"model": req.model, "max_tokens": 4096, "messages": messages}
         if system_prompt:
             body["system"] = system_prompt
@@ -182,11 +181,10 @@ async def chat(req: ChatRequest):
             if not r.is_success:
                 raise HTTPException(r.status_code, data.get("error", {}).get("message", "Erro na API Anthropic"))
             return {"reply": data["content"][0]["text"], "used_knowledge": req.use_knowledge}
-    # 
-── OpenAI ──
+    # -- OpenAI -
     elif req.provider == "openai":
         if not OPENAI_KEY:
-            raise HTTPException(400, "OPENAI_API_KEY não configurada no servidor.")
+            raise HTTPException(400, "OPENAI_API_KEY nao configurada no servidor.")
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
         async with httpx.AsyncClient(timeout=60) as client:
@@ -203,19 +201,19 @@ async def chat(req: ChatRequest):
                 raise HTTPException(r.status_code, data.get("error", {}).get("message", "Erro na API OpenAI"))
             return {"reply": data["choices"][0]["message"]["content"], "used_knowledge": req.use_knowledge}
     else:
-        raise HTTPException(400, "Provider inválido. Use 'claude' ou 'openai'.")
-# ── KNOWLEDGE BASE ────────────────────────────────────────────────────────────
+        raise HTTPException(400, "Provider invalido. Use 'claude' ou 'openai'.")
+# -- KNOWLEDGE BASE -----------------------------------------------------------
 @app.post("/api/knowledge/upload")
 async def upload_document(file: UploadFile = File(...)):
     if not supa:
-        raise HTTPException(503, "Supabase não configurado no servidor.")
+        raise HTTPException(503, "Supabase nao configurado no servidor.")
     content = await file.read()
     if len(content) > 20 * 1024 * 1024:  # 20MB limit
         raise HTTPException(400, "Arquivo muito grande. Limite: 20MB.")
     # Extract text
     text = extract_text(file.filename, content)
     if not text:
-        raise HTTPException(400, "Não foi possível extrair texto do arquivo.")
+        raise HTTPException(400, "Nao foi possivel extrair texto do arquivo.")
     doc_id = str(uuid.uuid4())
     # Save doc metadata
     supa.table("cortex_documents").insert({
@@ -261,11 +259,11 @@ async def list_documents():
 @app.delete("/api/knowledge/documents/{doc_id}")
 async def delete_document(doc_id: str):
     if not supa:
-        raise HTTPException(503, "Supabase não configurado.")
+        raise HTTPException(503, "Supabase nao configurado.")
     supa.table("cortex_chunks").delete().eq("doc_id", doc_id).execute()
     supa.table("cortex_documents").delete().eq("id", doc_id).execute()
     return {"deleted": doc_id}
-# ── static files (after API routes) ──────────────────────────────────────────
+# -- static files (after API routes) -----------------------------------------
 import os as _os
 if _os.path.isdir("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
