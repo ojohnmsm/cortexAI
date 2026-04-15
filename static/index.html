@@ -278,7 +278,8 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
     <div class="mhd"><div class="mt">Configuracoes</div><button class="btil" onclick="cm('m-cfg')">X</button></div>
     <div class="mbd">
       <div class="info-b">Configuracoes salvas localmente no seu navegador.</div>
-      <div><label>URL do Backend (Render)</label><input type="text" id="cfg-url" placeholder="https://cortex-ai.onrender.com" /></div>
+      <div class="info-b">A URL e detectada automaticamente. Altere apenas se estiver usando um backend diferente.</div>
+      <div><label>URL do Backend</label><input type="text" id="cfg-url" placeholder="https://cortex-ai.onrender.com" /></div>
     </div>
     <div class="mft"><button class="bs" onclick="cm('m-cfg')">Cancelar</button><button class="bp" onclick="saveCfg()">Salvar</button></div>
   </div>
@@ -355,7 +356,7 @@ const MODELS = {
 };
 
 let S = {
-  backendUrl:'', provider:'openai', model:'gpt-4o',
+  backendUrl: window.location.origin, provider:'openai', model:'gpt-4o',
   chats:{}, currentChat:null,
   personas:[], currentPersona:null,
   useKB:false, sidebarOpen:true,
@@ -381,11 +382,8 @@ async function doLogin() {
   const errEl = document.getElementById('login-err');
   errEl.style.display='none';
   if (!email || !pass) { errEl.textContent='Preencha email e senha.'; errEl.style.display='block'; return; }
-  if (!S.backendUrl) {
-    errEl.textContent='Configure a URL do backend primeiro em Configuracoes (icone de engrenagem).';
-    errEl.style.display='block'; return;
-  }
-  const isReg = S.loginTab==='register';
+  // backendUrl is auto-detected
+  const isReg = document.getElementById('l-pass2-wrap').style.display !== 'none';
   if (isReg) {
     const pass2 = document.getElementById('l-pass2').value;
     if (pass !== pass2) { errEl.textContent='As senhas nao conferem.'; errEl.style.display='block'; return; }
@@ -723,7 +721,7 @@ async function resetTok(uid){
 }
 
 // --- CONFIG ---
-function openCfg(){document.getElementById('cfg-url').value=S.backendUrl||'';document.getElementById('m-cfg').style.display='flex';}
+function openCfg(){document.getElementById('cfg-url').value=S.backendUrl||window.location.origin;document.getElementById('m-cfg').style.display='flex';}
 function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().replace(/\/$/,'');save();cm('m-cfg');toast('Configuracoes salvas!');}
 
 // --- KB MODAL ---
@@ -754,16 +752,7 @@ function md(text){
 function init(){
   load();
   // Auto-show settings if no URL
-  if (!S.backendUrl) {
-    document.getElementById('cfg-url').value='';
-    // Show config hint on login screen
-    const card = document.querySelector('.login-card');
-    const hint = document.createElement('div');
-    hint.style.cssText='margin-top:14px;font-size:12px;color:#888;text-align:center;cursor:pointer;text-decoration:underline';
-    hint.textContent='Configurar URL do backend';
-    hint.onclick=()=>openCfg();
-    card.appendChild(hint);
-  }
+  // backendUrl auto-detected from window.location.origin
   renderModels();
   if (S.token && S.user) {
     afterLogin();
