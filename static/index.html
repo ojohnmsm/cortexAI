@@ -632,10 +632,13 @@ async function loadDocs(){
     const icons={pdf:'&#128213;',docx:'&#128216;',pptx:'&#128217;',txt:'&#128196;'};
     list.innerHTML=docs.map(d=>{
       const ext=d.name.split('.').pop().toLowerCase();
+      const isOwner = S.user && (d.uploaded_by === S.user.id || S.user.role === 'admin');
+      const uploader = d.uploaded_by_email ? '<span style="color:var(--tx3)"> &middot; ' + esc(d.uploaded_by_email.split('@')[0]) + '</span>' : '';
+      const delBtn = isOwner ? `<button class="bd" onclick="delDoc('${d.id}','${esc(d.name)}')">&#x1F5D1;</button>` : '';
       return `<div class="doc-item">
         <div class="doc-icon">${icons[ext]||'&#128196;'}</div>
-        <div class="doc-info"><div class="doc-name">${esc(d.name)}</div><div class="doc-meta">${d.chunk_count} chunks</div></div>
-        <button class="bd" onclick="delDoc('${d.id}','${esc(d.name)}')">&#x1F5D1;</button></div>`;
+        <div class="doc-info"><div class="doc-name">${esc(d.name)}</div><div class="doc-meta">${d.chunk_count} chunks${uploader}</div></div>
+        ${delBtn}</div>`;
     }).join('');
   } catch(e){document.getElementById('doc-list').innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+e.message+'</div>';}
 }
