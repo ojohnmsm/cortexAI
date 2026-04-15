@@ -425,6 +425,8 @@ async def upload_document(
         "name": file.filename,
         "char_count": len(text),
         "chunk_count": 0,
+        "uploaded_by": profile["id"],
+        "uploaded_by_email": profile.get("email", ""),
     }).execute()
 
     chunks = chunk_text(text)
@@ -457,9 +459,17 @@ async def list_documents(profile: dict = Depends(get_current_user)):
 
 
 @app.delete("/api/knowledge/documents/{doc_id}")
-async def delete_document(doc_id: str, profile: dict = Depends(require_role(["admin"]))):
+async def delete_document(doc_id: str, profile: dict = Depends(get_current_user)):
     if not supa:
         raise HTTPException(503, "Supabase not configured.")
+    # Fetch doc to check ownership
+    doc_resp = supa.table("cortex_documents").select("uploaded_by").eq("id", doc_id).single().execute()
+    if not doc_resp.data:
+        raise HTTPException(404, "Document not found.")
+    is_owner = doc_resp.data.get("uploaded_by") == profile["id"]
+    is_admin = profile["role"] == "admin"
+    if not is_owner and not is_admin:
+        raise HTTPException(403, "You can only delete documents you uploaded.")
     supa.table("cortex_chunks").delete().eq("doc_id", doc_id).execute()
     supa.table("cortex_documents").delete().eq("id", doc_id).execute()
     return {"deleted": doc_id}
@@ -512,6 +522,8 @@ async def login(req: AuthRequest):
 async def register(req: AuthRequest):
     if not supa:
         raise HTTPException(503, "Supabase not configured.")
+    if not req.email.lower().endswith("@vale.com"):
+        raise HTTPException(403, "Registration is restricted to @vale.com email addresses.")
     try:
         resp = supa.auth.sign_up({"email": req.email, "password": req.password})
         if not resp.user:
