@@ -1244,12 +1244,12 @@ async def update_admin_global_rules(req: GlobalRulesUpdateRequest, profile: dict
     return serialize_global_rules(row)
 
 
-# --- Knowledge base (admin only for upload/delete, all authenticated for list) ---
+# --- Knowledge base (all authenticated users can upload/list; delete = owner or admin) ---
 
 @app.post("/api/knowledge/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    profile: dict = Depends(require_role(["admin", "claude_user"]))
+    profile: dict = Depends(get_current_user)
 ):
     if not supa:
         raise HTTPException(503, "Supabase not configured.")
