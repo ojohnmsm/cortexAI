@@ -254,7 +254,7 @@ class ConversationUpdateRequest(BaseModel):
 class ConversationMessageItem(BaseModel):
     role: str
     content: str
-    time: Optional[int] = None
+    time: Optional[Any] = None
     provider: Optional[str] = None
     usedKB: Optional[bool] = None
     tokens: Optional[int] = None
@@ -386,6 +386,30 @@ def utc_now_iso() -> str:
     return datetime.utcnow().isoformat()
 
 
+def utc_now_ms() -> int:
+    return int(datetime.utcnow().timestamp() * 1000)
+
+
+def normalize_time_ms(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        if s.isdigit():
+            return int(s)
+        try:
+            return int(datetime.fromisoformat(s.replace('Z', '+00:00')).timestamp() * 1000)
+        except Exception:
+            return None
+    return None
+
+
 def get_global_rules_record() -> Optional[dict]:
     if not supa:
         return None
@@ -462,10 +486,10 @@ def list_conversation_messages(conversation_id: str) -> List[dict]:
         {
             "role": item.get("role"),
             "content": item.get("content") or "",
-            "time": item.get("message_time") or item.get("created_at"),
+            "time": item.get("time_ms") if item.get("time_ms") is not None else item.get("created_at"),
             "provider": item.get("provider"),
-            "usedKB": item.get("used_kb", False),
-            "tokens": item.get("tokens_total"),
+            "usedKB": bool(item.get("used_knowledge", item.get("used_kb", False))),
+            "tokens": item.get("tokens_total", 0),
         }
         for item in items
     ]
@@ -498,42 +522,35 @@ def replace_conversation_messages(conversation: dict, messages: List[Conversatio
     if not messages:
         return 0
 
-    minimal_payload = []
-    legacy_payload = []
-
+    payload = []
     for i, msg in enumerate(messages):
-        minimal_payload.append({
+        msg_time_ms = normalize_time_ms(getattr(msg, "time", None)) or utc_now_ms()
+        msg_provider = getattr(msg, "provider", None) or provider or conversation.get("provider") or "openai"
+        msg_model = model or conversation.get("model")
+        msg_used_kb = bool(getattr(msg, "usedKB", False))
+        msg_tokens = int(getattr(msg, "tokens", 0) or 0)
+        payload.append({
             "id": str(uuid.uuid4()),
             "conversation_id": conversation_id,
             "user_id": user_id,
             "message_index": i,
-            "role": msg.role,
-            "content": msg.content,
-        })
-        legacy_payload.append({
-            "id": str(uuid.uuid4()),
-            "conversation_id": conversation_id,
-            "user_id": user_id,
             "position": i,
             "role": msg.role,
             "content": msg.content,
-            "message_time": msg.time,
-            "provider": msg.provider or provider,
-            "model": model or conversation.get("model"),
-            "used_kb": bool(msg.usedKB),
-            "tokens_total": msg.tokens,
+            "time_ms": msg_time_ms,
+            "provider": msg_provider,
+            "model": msg_model,
+            "used_knowledge": msg_used_kb,
+            "tokens_total": msg_tokens,
+            "sources_json": None,
         })
 
-    insert_errors = []
-    for payload in (minimal_payload, legacy_payload):
-        try:
-            supa.table("ai_messages").insert(payload).execute()
-            return len(payload)
-        except Exception as exc:
-            insert_errors.append(str(exc))
-            logger.warning("replace_conversation_messages fallback insert failed: %s", exc)
-
-    raise HTTPException(500, "Could not persist conversation messages: " + " | ".join(insert_errors))
+    try:
+        supa.table("ai_messages").insert(payload).execute()
+        return len(payload)
+    except Exception as exc:
+        logger.exception("replace_conversation_messages insert failed")
+        raise HTTPException(500, f"Could not persist conversation messages: {exc}")
 
 
 def record_message_audit(conversation: dict, message_position: int, provider: str, model: str, chunks: List[dict]) -> None:
@@ -547,6 +564,8 @@ def record_message_audit(conversation: dict, message_position: int, provider: st
             "user_id": conversation.get("user_id"),
             "provider": provider,
             "model": model,
+            "use_knowledge": bool(chunks),
+            "used_kb": bool(chunks),
         }
         audit_resp = supa.table("ai_message_audit").insert(audit_payload).execute()
         audit_row = (audit_resp.data or [audit_payload])[0]
@@ -554,7 +573,7 @@ def record_message_audit(conversation: dict, message_position: int, provider: st
 
         if chunks:
             source_rows = []
-            for chunk in chunks:
+            for rank, chunk in enumerate(chunks, start=1):
                 source_rows.append({
                     "id": str(uuid.uuid4()),
                     "audit_id": audit_id,
@@ -562,6 +581,7 @@ def record_message_audit(conversation: dict, message_position: int, provider: st
                     "doc_name": chunk.get("doc_name"),
                     "chunk_id": chunk.get("chunk_id") or chunk.get("id"),
                     "similarity": chunk.get("similarity"),
+                    "rank_position": rank,
                 })
             supa.table("ai_message_sources").insert(source_rows).execute()
     except Exception as exc:
@@ -993,10 +1013,10 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
                 ConversationMessageItem(
                     role=m.role,
                     content=m.content,
-                    time=utc_now_iso(),
+                    time=utc_now_ms(),
                     provider=provider,
                     usedKB=False,
-                    tokens=None,
+                    tokens=0,
                 )
                 for m in req.messages
                 if m.role in ("user", "assistant")
@@ -1005,7 +1025,7 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
                 ConversationMessageItem(
                     role="assistant",
                     content=reply,
-                    time=utc_now_iso(),
+                    time=utc_now_ms(),
                     provider=provider,
                     usedKB=used_kb,
                     tokens=input_tokens + output_tokens,
