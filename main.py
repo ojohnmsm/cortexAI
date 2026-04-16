@@ -1,6 +1,7 @@
 import os
 import io
 import uuid
+import json
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -151,6 +152,7 @@ class ChatRequest(BaseModel):
     system: Optional[str] = None
     personality_id: Optional[str] = None
     use_knowledge: bool = False
+    conversation_id: Optional[str] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -200,6 +202,7 @@ class ConversationMessageItem(BaseModel):
     provider: Optional[str] = None
     usedKB: Optional[bool] = None
     tokens: Optional[int] = None
+    sources: Optional[List[Dict[str, Any]]] = None
 
 
 class ConversationMessagesSyncRequest(BaseModel):
@@ -381,6 +384,7 @@ def list_conversation_messages(conversation_id: str) -> List[dict]:
             "provider": item.get("provider"),
             "usedKB": item.get("used_kb", False),
             "tokens": item.get("tokens_total"),
+            "sources": json.loads(item.get("sources_json") or "[]"),
         }
         for item in items
     ]
@@ -420,6 +424,7 @@ def replace_conversation_messages(conversation_id: str, messages: List[Conversat
             "provider": msg.provider or provider,
             "used_kb": bool(msg.usedKB),
             "tokens_total": msg.tokens,
+            "sources_json": json.dumps(msg.sources or [], ensure_ascii=False),
         })
     supa.table("ai_messages").insert(payload).execute()
     return len(payload)
@@ -431,6 +436,61 @@ def touch_conversation(conversation_id: str, update: Optional[dict] = None):
     update = dict(update or {})
     update["updated_at"] = utc_now_iso()
     supa.table("ai_conversations").update(update).eq("id", conversation_id).execute()
+
+
+def normalize_source_item(source: Dict[str, Any], rank: int) -> Dict[str, Any]:
+    return {
+        "document_id": source.get("document_id") or source.get("doc_id"),
+        "doc_name": source.get("doc_name") or source.get("document_name") or "Documento",
+        "chunk_id": source.get("chunk_id") or source.get("id"),
+        "similarity": source.get("similarity") if source.get("similarity") is not None else source.get("score"),
+        "rank": rank,
+    }
+
+
+def build_sources_from_chunks(chunks: List[dict]) -> List[dict]:
+    return [normalize_source_item(chunk, i + 1) for i, chunk in enumerate(chunks or [])]
+
+
+def record_chat_audit(conversation_id: Optional[str], profile: dict, req: ChatRequest, used_kb: bool, input_tokens: int, output_tokens: int, sources: List[dict]) -> Optional[str]:
+    if not supa:
+        return None
+    try:
+        audit_id = str(uuid.uuid4())
+        payload = {
+            "id": audit_id,
+            "conversation_id": conversation_id,
+            "user_id": profile["id"],
+            "provider": req.provider,
+            "model": req.model,
+            "personality_id": req.personality_id,
+            "use_knowledge": bool(req.use_knowledge),
+            "used_kb": bool(used_kb),
+            "tokens_input": input_tokens,
+            "tokens_output": output_tokens,
+            "tokens_total": input_tokens + output_tokens,
+            "created_at": utc_now_iso(),
+        }
+        supa.table("ai_message_audit").insert(payload).execute()
+        if sources:
+            rows = []
+            for src in sources:
+                rows.append({
+                    "id": str(uuid.uuid4()),
+                    "audit_id": audit_id,
+                    "conversation_id": conversation_id,
+                    "document_id": src.get("document_id"),
+                    "doc_name": src.get("doc_name"),
+                    "chunk_id": src.get("chunk_id"),
+                    "similarity": src.get("similarity"),
+                    "rank_position": src.get("rank"),
+                    "created_at": utc_now_iso(),
+                })
+            supa.table("ai_message_sources").insert(rows).execute()
+        return audit_id
+    except Exception as exc:
+        logger.error("record_chat_audit error: %s", exc)
+        return None
 
 
 # ---------------------------------------------------------------
