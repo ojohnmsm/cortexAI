@@ -2,7 +2,7 @@ import os
 import io
 import uuid
 import logging
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 import httpx
@@ -135,23 +135,6 @@ def update_token_usage(user_id: str, provider: str, model: str, input_tokens: in
         logger.error("update_token_usage error: %s", exc)
 
 
-def ensure_conversation_owner(conversation_id: str, user_id: str) -> dict:
-    if not supa:
-        raise HTTPException(503, "Supabase not configured.")
-    resp = (
-        supa.table("ai_conversations")
-        .select("*")
-        .eq("id", conversation_id)
-        .eq("user_id", user_id)
-        .limit(1)
-        .execute()
-    )
-    rows = resp.data or []
-    if not rows:
-        raise HTTPException(404, "Conversation not found.")
-    return rows[0]
-
-
 # ---------------------------------------------------------------
 # PYDANTIC MODELS
 # ---------------------------------------------------------------
@@ -195,9 +178,9 @@ class PersonalityUpdateRequest(BaseModel):
 
 
 class ConversationCreateRequest(BaseModel):
-    title: Optional[str] = "Novo chat"
-    provider: str
-    model: str
+    title: Optional[str] = None
+    provider: str = "openai"
+    model: str = "gpt-4o"
     personality_id: Optional[str] = None
     use_knowledge: bool = False
 
@@ -215,13 +198,17 @@ class ConversationMessageItem(BaseModel):
     content: str
     time: Optional[int] = None
     provider: Optional[str] = None
-    model: Optional[str] = None
-    usedKB: Optional[bool] = False
-    tokens: Optional[int] = 0
+    usedKB: Optional[bool] = None
+    tokens: Optional[int] = None
 
 
-class ConversationMessagesReplaceRequest(BaseModel):
+class ConversationMessagesSyncRequest(BaseModel):
     messages: List[ConversationMessageItem]
+
+
+class GlobalRulesUpdateRequest(BaseModel):
+    system_prompt: str
+    is_active: bool = True
 
 
 def slugify(text: str) -> str:
@@ -312,6 +299,10 @@ def get_visible_personalities(profile: dict) -> dict:
 def resolve_system_prompt(req: ChatRequest, profile: dict) -> Optional[str]:
     system_parts = []
 
+    global_rules = get_active_global_rules_text()
+    if global_rules:
+        system_parts.append(global_rules)
+
     if req.personality_id:
         personality = get_personality_by_id(req.personality_id)
         if not personality or not personality_visible_to_user(personality, profile):
@@ -327,6 +318,119 @@ def resolve_system_prompt(req: ChatRequest, profile: dict) -> Optional[str]:
 
     return "\n\n".join(system_parts) if system_parts else None
 
+
+
+# ---------------------------------------------------------------
+# GLOBAL RULES & CHAT HISTORY HELPERS
+# ---------------------------------------------------------------
+
+def utc_now_iso() -> str:
+    return datetime.utcnow().isoformat()
+
+
+def get_global_rules_record() -> Optional[dict]:
+    if not supa:
+        return None
+    try:
+        resp = supa.table("chat_global_rules").select("*").order("updated_at", desc=True).limit(1).execute()
+        data = resp.data or []
+        return data[0] if data else None
+    except Exception as exc:
+        logger.error("get_global_rules_record error: %s", exc)
+        return None
+
+
+def get_active_global_rules_text() -> Optional[str]:
+    row = get_global_rules_record()
+    if row and row.get("is_active", True):
+        return (row.get("system_prompt") or "").strip() or None
+    return None
+
+
+def serialize_global_rules(row: Optional[dict]) -> dict:
+    row = row or {}
+    return {
+        "id": row.get("id"),
+        "system_prompt": row.get("system_prompt") or "",
+        "is_active": row.get("is_active", True),
+        "updated_by": row.get("updated_by"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def get_user_conversation_or_404(conversation_id: str, profile: dict) -> dict:
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    resp = supa.table("ai_conversations").select("*").eq("id", conversation_id).eq("user_id", profile["id"]).limit(1).execute()
+    data = resp.data or []
+    if not data:
+        raise HTTPException(404, "Conversation not found.")
+    return data[0]
+
+
+def list_conversation_messages(conversation_id: str) -> List[dict]:
+    if not supa:
+        return []
+    resp = supa.table("ai_messages").select("*").eq("conversation_id", conversation_id).order("position").execute()
+    items = resp.data or []
+    return [
+        {
+            "role": item.get("role"),
+            "content": item.get("content") or "",
+            "time": item.get("message_time"),
+            "provider": item.get("provider"),
+            "usedKB": item.get("used_kb", False),
+            "tokens": item.get("tokens_total"),
+        }
+        for item in items
+    ]
+
+
+def serialize_conversation(row: dict, include_messages: bool = False) -> dict:
+    data = {
+        "id": row.get("id"),
+        "title": row.get("title") or "Novo chat",
+        "provider": row.get("provider") or "openai",
+        "model": row.get("model") or "gpt-4o",
+        "personality_id": row.get("personality_id"),
+        "use_knowledge": row.get("use_knowledge", False),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+    if include_messages:
+        data["messages"] = list_conversation_messages(row["id"])
+    return data
+
+
+def replace_conversation_messages(conversation_id: str, messages: List[ConversationMessageItem], provider: Optional[str] = None) -> int:
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    supa.table("ai_messages").delete().eq("conversation_id", conversation_id).execute()
+    if not messages:
+        return 0
+    payload = []
+    for i, msg in enumerate(messages):
+        payload.append({
+            "id": str(uuid.uuid4()),
+            "conversation_id": conversation_id,
+            "position": i,
+            "role": msg.role,
+            "content": msg.content,
+            "message_time": msg.time,
+            "provider": msg.provider or provider,
+            "used_kb": bool(msg.usedKB),
+            "tokens_total": msg.tokens,
+        })
+    supa.table("ai_messages").insert(payload).execute()
+    return len(payload)
+
+
+def touch_conversation(conversation_id: str, update: Optional[dict] = None):
+    if not supa:
+        return
+    update = dict(update or {})
+    update["updated_at"] = utc_now_iso()
+    supa.table("ai_conversations").update(update).eq("id", conversation_id).execute()
 
 
 # ---------------------------------------------------------------
@@ -576,140 +680,6 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
 
 
 
-# --- Conversations ---
-
-@app.get("/api/conversations")
-async def list_conversations(profile: dict = Depends(get_current_user)):
-    if not supa:
-        raise HTTPException(503, "Supabase not configured.")
-
-    conv_resp = (
-        supa.table("ai_conversations")
-        .select("*")
-        .eq("user_id", profile["id"])
-        .order("updated_at", desc=True)
-        .execute()
-    )
-    conversations = conv_resp.data or []
-
-    msg_resp = (
-        supa.table("ai_messages")
-        .select("*")
-        .eq("user_id", profile["id"])
-        .order("created_at")
-        .execute()
-    )
-    all_messages = msg_resp.data or []
-
-    grouped = {}
-    for msg in all_messages:
-        grouped.setdefault(msg["conversation_id"], []).append({
-            "role": msg.get("role"),
-            "content": msg.get("content"),
-            "time": msg.get("time_ms"),
-            "provider": msg.get("provider"),
-            "model": msg.get("model"),
-            "usedKB": msg.get("used_knowledge", False),
-            "tokens": msg.get("tokens_total", 0),
-        })
-
-    return [
-        {
-            "id": c["id"],
-            "title": c.get("title") or "Novo chat",
-            "provider": c.get("provider"),
-            "model": c.get("model"),
-            "personality_id": c.get("personality_id"),
-            "use_knowledge": c.get("use_knowledge", False),
-            "created_at": c.get("created_at"),
-            "updated_at": c.get("updated_at"),
-            "messages": grouped.get(c["id"], []),
-        }
-        for c in conversations
-    ]
-
-
-@app.post("/api/conversations")
-async def create_conversation(req: ConversationCreateRequest, profile: dict = Depends(get_current_user)):
-    if not supa:
-        raise HTTPException(503, "Supabase not configured.")
-
-    now = datetime.utcnow().isoformat()
-    payload = {
-        "id": str(uuid.uuid4()),
-        "user_id": profile["id"],
-        "title": (req.title or "Novo chat").strip() or "Novo chat",
-        "provider": req.provider,
-        "model": req.model,
-        "personality_id": req.personality_id,
-        "use_knowledge": req.use_knowledge,
-        "created_at": now,
-        "updated_at": now,
-    }
-    supa.table("ai_conversations").insert(payload).execute()
-    return payload
-
-
-@app.put("/api/conversations/{conversation_id}")
-async def update_conversation(conversation_id: str, req: ConversationUpdateRequest, profile: dict = Depends(get_current_user)):
-    if not supa:
-        raise HTTPException(503, "Supabase not configured.")
-
-    ensure_conversation_owner(conversation_id, profile["id"])
-
-    update = {"updated_at": datetime.utcnow().isoformat()}
-    if req.title is not None:
-        update["title"] = req.title.strip() or "Novo chat"
-    if req.provider is not None:
-        update["provider"] = req.provider
-    if req.model is not None:
-        update["model"] = req.model
-    if req.personality_id is not None:
-        update["personality_id"] = req.personality_id
-    if req.use_knowledge is not None:
-        update["use_knowledge"] = req.use_knowledge
-
-    supa.table("ai_conversations").update(update).eq("id", conversation_id).eq("user_id", profile["id"]).execute()
-    return {"updated": conversation_id}
-
-
-@app.put("/api/conversations/{conversation_id}/messages")
-async def replace_conversation_messages(conversation_id: str, req: ConversationMessagesReplaceRequest, profile: dict = Depends(get_current_user)):
-    ensure_conversation_owner(conversation_id, profile["id"])
-    supa.table("ai_messages").delete().eq("conversation_id", conversation_id).eq("user_id", profile["id"]).execute()
-
-    rows = []
-    for idx, m in enumerate(req.messages or []):
-        rows.append({
-            "id": str(uuid.uuid4()),
-            "conversation_id": conversation_id,
-            "user_id": profile["id"],
-            "message_index": idx,
-            "role": m.role,
-            "content": m.content,
-            "time_ms": m.time,
-            "provider": m.provider,
-            "model": m.model,
-            "used_knowledge": bool(m.usedKB),
-            "tokens_total": m.tokens or 0,
-            "created_at": datetime.utcnow().isoformat(),
-        })
-
-    if rows:
-        supa.table("ai_messages").insert(rows).execute()
-
-    supa.table("ai_conversations").update({"updated_at": datetime.utcnow().isoformat()}).eq("id", conversation_id).eq("user_id", profile["id"]).execute()
-    return {"updated": conversation_id, "messages": len(rows)}
-
-
-@app.delete("/api/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str, profile: dict = Depends(get_current_user)):
-    ensure_conversation_owner(conversation_id, profile["id"])
-    supa.table("ai_messages").delete().eq("conversation_id", conversation_id).eq("user_id", profile["id"]).execute()
-    supa.table("ai_conversations").delete().eq("id", conversation_id).eq("user_id", profile["id"]).execute()
-    return {"deleted": conversation_id}
-
-
 # --- Personalities ---
 
 @app.get("/api/personalities")
@@ -819,6 +789,111 @@ async def delete_personality(personality_id: str, profile: dict = Depends(get_cu
     supa.table('ai_personalities').delete().eq('id', personality_id).execute()
     return {'deleted': personality_id}
 
+
+
+# --- Chat history ---
+
+@app.get("/api/conversations")
+async def list_conversations(profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    resp = supa.table("ai_conversations").select("*").eq("user_id", profile["id"]).order("updated_at", desc=True).execute()
+    items = resp.data or []
+    return {"items": [serialize_conversation(item, include_messages=True) for item in items]}
+
+
+@app.post("/api/conversations")
+async def create_conversation(req: ConversationCreateRequest, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    now = utc_now_iso()
+    payload = {
+        "id": str(uuid.uuid4()),
+        "user_id": profile["id"],
+        "title": (req.title or "Novo chat").strip() or "Novo chat",
+        "provider": req.provider,
+        "model": req.model,
+        "personality_id": req.personality_id,
+        "use_knowledge": bool(req.use_knowledge),
+        "created_at": now,
+        "updated_at": now,
+    }
+    resp = supa.table("ai_conversations").insert(payload).execute()
+    row = (resp.data or [payload])[0]
+    return serialize_conversation(row, include_messages=True)
+
+
+@app.put("/api/conversations/{conversation_id}")
+async def update_conversation(conversation_id: str, req: ConversationUpdateRequest, profile: dict = Depends(get_current_user)):
+    current = get_user_conversation_or_404(conversation_id, profile)
+    update = {}
+    if req.title is not None:
+        update["title"] = req.title.strip() or "Novo chat"
+    if req.provider is not None:
+        update["provider"] = req.provider
+    if req.model is not None:
+        update["model"] = req.model
+    if req.personality_id is not None:
+        update["personality_id"] = req.personality_id
+    if req.use_knowledge is not None:
+        update["use_knowledge"] = req.use_knowledge
+    if not update:
+        return serialize_conversation(current, include_messages=True)
+    touch_conversation(conversation_id, update)
+    updated = get_user_conversation_or_404(conversation_id, profile)
+    return serialize_conversation(updated, include_messages=True)
+
+
+@app.get("/api/conversations/{conversation_id}/messages")
+async def get_conversation_messages(conversation_id: str, profile: dict = Depends(get_current_user)):
+    get_user_conversation_or_404(conversation_id, profile)
+    return {"items": list_conversation_messages(conversation_id)}
+
+
+@app.put("/api/conversations/{conversation_id}/messages")
+async def sync_conversation_messages(conversation_id: str, req: ConversationMessagesSyncRequest, profile: dict = Depends(get_current_user)):
+    current = get_user_conversation_or_404(conversation_id, profile)
+    count = replace_conversation_messages(conversation_id, req.messages, provider=current.get("provider"))
+    touch_conversation(conversation_id)
+    return {"conversation_id": conversation_id, "count": count}
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str, profile: dict = Depends(get_current_user)):
+    get_user_conversation_or_404(conversation_id, profile)
+    supa.table("ai_messages").delete().eq("conversation_id", conversation_id).execute()
+    supa.table("ai_conversations").delete().eq("id", conversation_id).execute()
+    return {"deleted": conversation_id}
+
+
+# --- Admin: global rules ---
+
+@app.get("/api/admin/global-rules")
+async def get_admin_global_rules(profile: dict = Depends(require_role(["admin"]))):
+    return serialize_global_rules(get_global_rules_record())
+
+
+@app.put("/api/admin/global-rules")
+async def update_admin_global_rules(req: GlobalRulesUpdateRequest, profile: dict = Depends(require_role(["admin"]))):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    prompt = (req.system_prompt or "").strip()
+    now = utc_now_iso()
+    current = get_global_rules_record()
+    payload = {
+        "system_prompt": prompt,
+        "is_active": bool(req.is_active),
+        "updated_by": profile["id"],
+        "updated_at": now,
+    }
+    if current and current.get("id"):
+        resp = supa.table("chat_global_rules").update(payload).eq("id", current["id"]).execute()
+        row = (resp.data or [None])[0] or get_global_rules_record()
+    else:
+        payload.update({"id": str(uuid.uuid4()), "created_at": now})
+        resp = supa.table("chat_global_rules").insert(payload).execute()
+        row = (resp.data or [payload])[0]
+    return serialize_global_rules(row)
 
 
 # --- Knowledge base (admin only for upload/delete, all authenticated for list) ---
