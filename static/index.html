@@ -515,6 +515,8 @@ async function doLogin() {
   errEl.style.display='none';
   if (!email || !pass) { errEl.textContent='Preencha email e senha.'; errEl.style.display='block'; return; }
   if (!S.backendUrl) {
+     S.backendUrl = window.location.origin;
+  }
     errEl.textContent='Configure a URL do backend primeiro em Configuracoes (icone de engrenagem).';
     errEl.style.display='block'; return;
   }
