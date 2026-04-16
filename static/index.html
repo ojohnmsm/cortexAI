@@ -1346,8 +1346,9 @@ async function uploadDoc(file=null){
   try{
     const url=getApiBase()+'/api/knowledge/upload';
     const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(data.detail||'Erro ao enviar documento');
+    const data=await readApiPayload(r);
+    if(r.status===401){ doLogout(); throw new Error('Sessão expirada. Faça login novamente.'); }
+    if(!r.ok) throw new Error(data.detail||('Erro ao enviar documento ('+r.status+')'));
     if(inp) inp.value='';
     toast('Documento enviado!');
     await loadDocs();
