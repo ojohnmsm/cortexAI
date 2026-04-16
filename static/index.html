@@ -367,8 +367,29 @@ let S = {
   loginTab:'login',
 };
 
-const save = () => localStorage.setItem('cortex-ai', JSON.stringify(S));
-const load = () => { try { const d=JSON.parse(localStorage.getItem('cortex-ai')); if(d) S={...S,...d}; } catch(e){} };
+const STORAGE_KEY = 'cortex-ai-ui';
+function save(){
+  const data = {
+    backendUrl:S.backendUrl,
+    provider:S.provider,
+    model:S.model,
+    currentChat:S.currentChat,
+    currentPersona:S.currentPersona,
+    defaultPersonaId:S.defaultPersonaId,
+    useKB:S.useKB,
+    sidebarOpen:S.sidebarOpen,
+    token:S.token,
+    user:S.user,
+    loginTab:S.loginTab,
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+function load(){
+  try {
+    const d=JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if(d) S={...S,...d,chats:{}};
+  } catch(e){}
+}
 
 // --- AUTH ---
 function setLoginTab(t) {
@@ -408,7 +429,7 @@ async function doLogin() {
     S.token = data.access_token;
     S.user = data.user;
     save();
-    afterLogin();
+    await afterLogin();
   } catch(err) {
     errEl.textContent = err.message;
     errEl.style.display='block';
@@ -420,24 +441,30 @@ async function doLogin() {
 async function afterLogin() {
   document.getElementById('login-screen').style.display='none';
   renderUserBar();
-  // Show admin btn if admin
   if (S.user && S.user.role === 'admin') {
     document.getElementById('admin-btn').style.display='';
   }
-  // Restrict Claude if not allowed
   if (S.user && !['admin','claude_user'].includes(S.user.role)) {
     document.getElementById('btn-claude').disabled = true;
     document.getElementById('btn-claude').title = 'Sem acesso ao Claude. Contate o administrador.';
     if (S.provider === 'claude') { S.provider='openai'; }
+  } else {
+    document.getElementById('btn-claude').disabled = false;
+    document.getElementById('btn-claude').title = '';
   }
   renderModels();
   setProv(S.provider, false);
   document.getElementById('model-sel').value = S.model;
   try { await loadPersonalities(); } catch (e) { console.error(e); }
+  try { await loadConversations(); } catch (e) { console.error(e); toast('Erro ao carregar historico: '+e.message,'err'); }
   renderChats();
   updateKBBtn();
   if (S.currentChat && S.chats[S.currentChat]) loadChat(S.currentChat);
-  else renderPerOpts();
+  else {
+    S.currentPersona = S.defaultPersonaId || null;
+    renderPerOpts();
+    showEmpty();
+  }
 }
 
 function doLogout() {
@@ -476,6 +503,85 @@ async function authFetch(path, opts={}) {
   return r;
 }
 
+
+async function loadConversations(){
+  if(!S.token||!S.backendUrl){S.chats={};S.currentChat=null;return;}
+  const r=await authFetch('/api/conversations');
+  const data=await r.json();
+  if(!r.ok) throw new Error(data.detail||'Erro ao carregar conversas');
+  const chats={};
+  (Array.isArray(data)?data:[]).forEach(c=>{
+    chats[c.id]={
+      id:c.id,
+      title:c.title||'Novo chat',
+      messages:Array.isArray(c.messages)?c.messages:[],
+      provider:c.provider||'openai',
+      model:c.model||S.model,
+      personaId:c.personality_id||null,
+      useKB:!!c.use_knowledge,
+    };
+  });
+  S.chats=chats;
+  if(S.currentChat && !S.chats[S.currentChat]) S.currentChat=null;
+  if(!S.currentChat){
+    const ids=Object.keys(S.chats);
+    if(ids.length) S.currentChat=ids[0];
+  }
+  save();
+}
+
+async function createChatRemote(){
+  const r=await authFetch('/api/conversations',{
+    method:'POST',
+    body:JSON.stringify({
+      title:'Novo chat',
+      provider:S.provider,
+      model:S.model,
+      personality_id:S.currentPersona||null,
+      use_knowledge:S.useKB,
+    }),
+  });
+  const data=await r.json();
+  if(!r.ok) throw new Error(data.detail||'Erro ao criar conversa');
+  return data;
+}
+
+async function saveConversationMeta(chatId){
+  const chat=S.chats[chatId];
+  if(!chat||!S.token) return;
+  const r=await authFetch('/api/conversations/'+chatId,{
+    method:'PUT',
+    body:JSON.stringify({
+      title:chat.title||'Novo chat',
+      provider:chat.provider||S.provider,
+      model:chat.model||S.model,
+      personality_id:chat.personaId||null,
+      use_knowledge:typeof chat.useKB==='boolean'?chat.useKB:S.useKB,
+    }),
+  });
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.detail||'Erro ao salvar conversa');
+}
+
+async function saveConversationMessages(chatId){
+  const chat=S.chats[chatId];
+  if(!chat||!S.token) return;
+  const r=await authFetch('/api/conversations/'+chatId+'/messages',{
+    method:'PUT',
+    body:JSON.stringify({messages:(chat.messages||[]).map(m=>(
+      {role:m.role,content:m.content,time:m.time||null,provider:m.provider||null,model:m.model||null,usedKB:!!m.usedKB,tokens:m.tokens||0}
+    ))}),
+  });
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.detail||'Erro ao salvar mensagens');
+}
+
+function syncCurrentChatMeta(){
+  if(S.currentChat&&S.chats[S.currentChat]){
+    saveConversationMeta(S.currentChat).catch(e=>console.error('saveConversationMeta',e));
+  }
+}
+
 // --- PROVIDER / MODEL ---
 function setProv(p, sv=true) {
   S.provider=p;
@@ -483,37 +589,62 @@ function setProv(p, sv=true) {
   document.getElementById('btn-openai').className='prov-btn'+(p==='openai'?' ao':'');
   renderModels();
   if(sv){S.model=MODELS[p][0].id;document.getElementById('model-sel').value=S.model;save();}
+  if(S.currentChat&&S.chats[S.currentChat]){
+    S.chats[S.currentChat].provider=S.provider;
+    S.chats[S.currentChat].model=S.model;
+    syncCurrentChatMeta();
+  }
 }
 function renderModels(){
   const sel=document.getElementById('model-sel');
   sel.innerHTML=MODELS[S.provider].map(m=>`<option value="${m.id}">${m.l}</option>`).join('');
   sel.value=S.model;
 }
-function setModel(v){S.model=v;save();}
-function toggleKB(){S.useKB=!S.useKB;updateKBBtn();save();}
+function setModel(v){S.model=v; if(S.currentChat&&S.chats[S.currentChat]){S.chats[S.currentChat].model=v; syncCurrentChatMeta();} save();}
+function toggleKB(){S.useKB=!S.useKB; if(S.currentChat&&S.chats[S.currentChat]) S.chats[S.currentChat].useKB=S.useKB; updateKBBtn(); syncCurrentChatMeta(); save();}
 function updateKBBtn(){const b=document.getElementById('kb-btn');b.className='kb-btn'+(S.useKB?' on':'');}
 
 // --- CHATS ---
-function newChat(){
-  const id='c'+Date.now();
-  S.chats[id]={title:'Novo chat',messages:[],provider:S.provider,model:S.model,personaId:S.currentPersona};
-  S.currentChat=id;save();renderChats();loadChat(id);
+async function newChat(){
+  if(!S.token){toast('Faca login primeiro','err');return null;}
+  const data=await createChatRemote();
+  const id=data.id;
+  S.chats[id]={id,title:data.title||'Novo chat',messages:[],provider:data.provider||S.provider,model:data.model||S.model,personaId:data.personality_id||S.currentPersona||null,useKB:!!data.use_knowledge};
+  S.currentChat=id;save();renderChats();loadChat(id);return S.chats[id];
 }
 function loadChat(id){
   S.currentChat=id;const c=S.chats[id];if(!c)return;
   document.getElementById('chat-title').textContent=c.title;
   setProv(c.provider||S.provider,false);S.model=c.model||S.model;
   document.getElementById('model-sel').value=S.model;
-  S.currentPersona=c.personaId||null;
+  S.useKB=typeof c.useKB==='boolean'?c.useKB:S.useKB;
+  S.currentPersona=c.personaId||S.defaultPersonaId||null;
+  updateKBBtn();
   renderPerOpts();
-  renderMsgs(c.messages);renderChats();save();
+  renderMsgs(c.messages||[]);renderChats();save();
 }
-function delChat(id,e){
-  e.stopPropagation();delete S.chats[id];
-  if(S.currentChat===id){S.currentChat=null;showEmpty();}
-  save();renderChats();
+async function delChat(id,e){
+  e.stopPropagation();
+  try{
+    const r=await authFetch('/api/conversations/'+id,{method:'DELETE'});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.detail||'Erro ao excluir conversa');
+    delete S.chats[id];
+    if(S.currentChat===id){
+      const ids=Object.keys(S.chats).reverse();
+      S.currentChat=ids.length?ids[0]:null;
+      if(S.currentChat) loadChat(S.currentChat); else showEmpty();
+    }
+    save();renderChats();
+  }catch(err){toast('Erro: '+err.message,'err');}
 }
-function clearChat(){if(!S.currentChat)return;S.chats[S.currentChat].messages=[];renderMsgs([]);save();}
+async function clearChat(){
+  if(!S.currentChat)return;
+  S.chats[S.currentChat].messages=[];
+  renderMsgs([]);
+  save();
+  try{await saveConversationMessages(S.currentChat);}catch(err){toast('Erro ao limpar chat: '+err.message,'err');}
+}
 function renderChats(){
   const list=document.getElementById('chat-list');
   const ids=Object.keys(S.chats).reverse();
@@ -574,9 +705,9 @@ async function send(){
   const text=input.value.trim();if(!text)return;
   if(!S.backendUrl){toast('Configure a URL do backend em ⚙','err');openCfg();return;}
   if(!S.token){toast('Faca login primeiro','err');return;}
-  if(!S.currentChat||!S.chats[S.currentChat])newChat();
+  if(!S.currentChat||!S.chats[S.currentChat]) await newChat();
   const chat=S.chats[S.currentChat];
-  chat.provider=S.provider;chat.model=S.model;
+  chat.provider=S.provider;chat.model=S.model;chat.personaId=S.currentPersona||null;chat.useKB=S.useKB;
   const uMsg={role:'user',content:text,time:Date.now()};
   chat.messages.push(uMsg);
   if(chat.messages.length===1){chat.title=text.slice(0,38)+(text.length>38?'..':'');document.getElementById('chat-title').textContent=chat.title;renderChats();}
@@ -584,6 +715,8 @@ async function send(){
   document.getElementById('send-btn').disabled=true;
   appendMsg(uMsg);showThink();save();
   try {
+    await saveConversationMeta(S.currentChat);
+    await saveConversationMessages(S.currentChat);
     const r=await authFetch('/api/chat',{
       method:'POST',
       body:JSON.stringify({
@@ -599,13 +732,15 @@ async function send(){
     const total=(data.tokens&&data.tokens.total)||0;
     const aMsg={role:'assistant',content:data.reply,provider:S.provider,model:S.model,time:Date.now(),usedKB:data.used_knowledge,tokens:total};
     chat.messages.push(aMsg);appendMsg(aMsg);
-    // Update local token counter
     if(S.user&&total>0){S.user.tokens_used=(S.user.tokens_used||0)+total;renderUserBar();}
+    await saveConversationMessages(S.currentChat);
     save();
   } catch(err){
     rmThink();
     const em={role:'assistant',content:'Erro: '+err.message,provider:S.provider,time:Date.now()};
-    chat.messages.push(em);appendMsg(em);save();
+    chat.messages.push(em);appendMsg(em);
+    try{await saveConversationMessages(S.currentChat);}catch(e){console.error(e);}
+    save();
   }
   document.getElementById('send-btn').disabled=false;renderChats();
 }
@@ -725,7 +860,7 @@ async function addPersona(){
 function usePer(id){
   S.currentPersona=id||null;
   document.getElementById('per-sel').value=S.currentPersona||'';
-  if(S.currentChat&&S.chats[S.currentChat]) S.chats[S.currentChat].personaId=S.currentPersona;
+  if(S.currentChat&&S.chats[S.currentChat]) {S.chats[S.currentChat].personaId=S.currentPersona; syncCurrentChatMeta();}
   save();renderPerList();toast('Personalidade selecionada');
 }
 async function delPer(id){
@@ -750,7 +885,7 @@ function renderPerOpts(){
 }
 function setPersona(v){
   S.currentPersona=v||null;
-  if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;
+  if(S.currentChat&&S.chats[S.currentChat]){S.chats[S.currentChat].personaId=S.currentPersona; syncCurrentChatMeta();}
   save();
 }
 
@@ -811,7 +946,7 @@ function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().
 function openKnowledge(){loadDocs();document.getElementById('m-kb').style.display='flex';}
 
 // --- HELPERS ---
-function toggleSB(){S.sidebarOpen=!S.sidebarOpen;document.getElementById('sidebar').classList.toggle('collapsed',!S.sidebarOpen);}
+function toggleSB(){S.sidebarOpen=!S.sidebarOpen;document.getElementById('sidebar').classList.toggle('collapsed',!S.sidebarOpen);save();}
 function cm(id){document.getElementById(id).style.display='none';}
 function co(e,id){if(e.target===e.currentTarget)cm(id);}
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
@@ -847,7 +982,7 @@ function init(){
   }
   renderModels();
   if (S.token && S.user) {
-    afterLogin();
+    afterLogin().catch(console.error);
   }
 }
 
