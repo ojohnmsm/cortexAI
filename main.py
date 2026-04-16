@@ -1,5 +1,6 @@
 import os
 import io
+import base64
 import uuid
 import logging
 from typing import Optional, List, Dict, Any
@@ -152,6 +153,7 @@ class ChatRequest(BaseModel):
     personality_id: Optional[str] = None
     use_knowledge: bool = False
     think: bool = False
+    attachment_ids: List[str] = []
 
 
 def get_allowed_openai_models_for_admin() -> List[str]:
@@ -188,6 +190,20 @@ def apply_chat_model_policy(req: ChatRequest, profile: dict) -> tuple[str, str]:
     return "openai", ("gpt-4o" if req.think else "gpt-5.4-nano")
 
 
+
+
+
+class AttachmentUploadResponse(BaseModel):
+    id: str
+    file_name: str
+    mime_type: str
+    attachment_type: str
+    extracted_text: Optional[str] = None
+    image_data_url: Optional[str] = None
+
+
+class ChatAttachmentRef(BaseModel):
+    id: str
 
 
 class UpdateProfileRequest(BaseModel):
@@ -470,6 +486,60 @@ def touch_conversation(conversation_id: str, update: Optional[dict] = None):
     supa.table("ai_conversations").update(update).eq("id", conversation_id).execute()
 
 
+
+# ---------------------------------------------------------------
+# CHAT ATTACHMENTS HELPERS
+# ---------------------------------------------------------------
+
+ALLOWED_CHAT_IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
+ALLOWED_CHAT_DOC_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+MAX_CHAT_IMAGE_BYTES = 3 * 1024 * 1024
+MAX_CHAT_DOC_BYTES = 10 * 1024 * 1024
+
+
+def guess_attachment_type(content_type: str, filename: str) -> str:
+    ct = (content_type or "").lower()
+    ext = (filename.rsplit(".", 1)[-1].lower() if "." in filename else "")
+    if ct in ALLOWED_CHAT_IMAGE_TYPES or ext in ("png", "jpg", "jpeg", "webp"):
+        return "image"
+    return "document"
+
+
+def make_data_url(content_type: str, content: bytes) -> str:
+    return f"data:{content_type};base64," + base64.b64encode(content).decode("ascii")
+
+
+def serialize_chat_attachment(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "conversation_id": row.get("conversation_id"),
+        "file_name": row.get("file_name"),
+        "mime_type": row.get("mime_type"),
+        "file_size": row.get("file_size"),
+        "attachment_type": row.get("attachment_type"),
+        "extracted_text": row.get("extracted_text"),
+        "image_data_url": row.get("image_data_url"),
+        "created_at": row.get("created_at"),
+    }
+
+
+def get_chat_attachments_for_user(profile: dict, conversation_id: Optional[str] = None, attachment_ids: Optional[List[str]] = None) -> List[dict]:
+    if not supa:
+        return []
+    q = supa.table("ai_chat_attachments").select("*").eq("user_id", profile["id"])
+    if conversation_id:
+        q = q.eq("conversation_id", conversation_id)
+    if attachment_ids:
+        q = q.in_("id", attachment_ids)
+    q = q.order("created_at")
+    resp = q.execute()
+    return resp.data or []
+
 # ---------------------------------------------------------------
 # KNOWLEDGE HELPERS
 # ---------------------------------------------------------------
@@ -607,6 +677,81 @@ async def reset_tokens(req: UpdateProfileRequest, profile: dict = Depends(requir
     return {"reset": req.user_id}
 
 
+
+# --- Chat attachments ---
+
+@app.get("/api/chat/attachments")
+async def list_chat_attachments(conversation_id: Optional[str] = None, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    items = get_chat_attachments_for_user(profile, conversation_id=conversation_id)
+    return [serialize_chat_attachment(x) for x in items]
+
+
+@app.post("/api/chat/attachments/upload")
+async def upload_chat_attachment(
+    conversation_id: str,
+    file: UploadFile = File(...),
+    profile: dict = Depends(get_current_user),
+):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    get_user_conversation_or_404(conversation_id, profile)
+
+    content = await file.read()
+    filename = file.filename or "arquivo"
+    content_type = (file.content_type or "").lower()
+    attachment_type = guess_attachment_type(content_type, filename)
+
+    if attachment_type == "image":
+        if len(content) > MAX_CHAT_IMAGE_BYTES:
+            raise HTTPException(400, "Imagem muito grande. Limite de 3 MB.")
+        if content_type not in ALLOWED_CHAT_IMAGE_TYPES:
+            raise HTTPException(400, "Formato de imagem não suportado. Use PNG, JPG/JPEG ou WEBP.")
+        payload = {
+            "id": str(uuid.uuid4()),
+            "conversation_id": conversation_id,
+            "user_id": profile["id"],
+            "file_name": filename,
+            "mime_type": content_type,
+            "file_size": len(content),
+            "attachment_type": "image",
+            "image_data_url": make_data_url(content_type, content),
+            "extracted_text": None,
+        }
+    else:
+        if len(content) > MAX_CHAT_DOC_BYTES:
+            raise HTTPException(400, "Arquivo muito grande. Limite de 10 MB.")
+        text = extract_text(filename, content)
+        if not text.strip():
+            raise HTTPException(400, "Não foi possível extrair texto do arquivo.")
+        payload = {
+            "id": str(uuid.uuid4()),
+            "conversation_id": conversation_id,
+            "user_id": profile["id"],
+            "file_name": filename,
+            "mime_type": content_type or "application/octet-stream",
+            "file_size": len(content),
+            "attachment_type": "document",
+            "image_data_url": None,
+            "extracted_text": text[:120000],
+        }
+
+    supa.table("ai_chat_attachments").insert(payload).execute()
+    return serialize_chat_attachment(payload)
+
+
+@app.delete("/api/chat/attachments/{attachment_id}")
+async def delete_chat_attachment(attachment_id: str, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    items = get_chat_attachments_for_user(profile, attachment_ids=[attachment_id])
+    if not items:
+        raise HTTPException(404, "Attachment not found.")
+    supa.table("ai_chat_attachments").delete().eq("id", attachment_id).eq("user_id", profile["id"]).execute()
+    return {"deleted": attachment_id}
+
+
 # --- Chat ---
 
 @app.post("/api/chat")
@@ -622,6 +767,29 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     resolved_system = resolve_system_prompt(req, profile)
     if resolved_system:
         system_parts.append(resolved_system)
+
+    attachments = []
+    if req.attachment_ids:
+        attachments = get_chat_attachments_for_user(profile, attachment_ids=req.attachment_ids)
+
+    doc_attachments = [a for a in attachments if a.get("attachment_type") == "document"]
+    image_attachments = [a for a in attachments if a.get("attachment_type") == "image"]
+
+    if image_attachments:
+        if provider != "openai":
+            raise HTTPException(400, "Imagens no chat estão disponíveis apenas com ChatGPT/OpenAI neste momento.")
+        if profile["role"] != "admin":
+            model = "gpt-4o"
+
+    if doc_attachments:
+        context_blocks = []
+        for att in doc_attachments:
+            context_blocks.append(f"[Arquivo anexado: {att.get('file_name','arquivo')}\n{att.get('extracted_text','')}]")
+        system_parts.append(
+            "Use também os seguintes arquivos anexados pelo usuário como contexto temporário desta conversa. "
+            "Cite o nome do arquivo quando usar alguma informação deles.\n\n"
+            + "\n\n---\n\n".join(context_blocks)
+        )
 
     used_kb = False
     chunks = []
@@ -680,10 +848,22 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     elif provider == "openai":
         if not OPENAI_KEY:
             raise HTTPException(400, "OPENAI_API_KEY not set on server.")
+        openai_messages = messages.copy()
         if system_prompt:
-            messages = [{"role": "system", "content": system_prompt}] + messages
+            openai_messages = [{"role": "system", "content": system_prompt}] + openai_messages
 
-        payload = {"model": model, "messages": messages}
+        if image_attachments and openai_messages:
+            for idx in range(len(openai_messages) - 1, -1, -1):
+                if openai_messages[idx]["role"] == "user":
+                    original_text = openai_messages[idx]["content"]
+                    content_parts = [{"type": "text", "text": original_text}]
+                    for att in image_attachments:
+                        if att.get("image_data_url"):
+                            content_parts.append({"type": "image_url", "image_url": {"url": att["image_data_url"]}})
+                    openai_messages[idx] = {"role": "user", "content": content_parts}
+                    break
+
+        payload = {"model": model, "messages": openai_messages}
         if model == "gpt-5.4-nano":
             payload["max_completion_tokens"] = 4096
         else:
@@ -710,14 +890,16 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     else:
         raise HTTPException(400, "Invalid provider.")
 
-    # Update token usage (best-effort)
     if supa and (input_tokens + output_tokens) > 0:
         update_token_usage(profile["id"], provider, model, input_tokens, output_tokens)
 
     return {
         "reply": reply,
         "used_knowledge": used_kb,
+        "used_attachments": bool(attachments),
+        "attachment_names": [a.get("file_name") for a in attachments],
         "tokens": {"input": input_tokens, "output": output_tokens, "total": input_tokens + output_tokens},
+        "effective_model": model,
     }
 
 
