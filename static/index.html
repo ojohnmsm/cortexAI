@@ -511,6 +511,21 @@ function doLogout() {
   showEmpty();
 }
 
+function renderUserBar() {
+  if (!S.user) return;
+  const used = S.user.tokens_used || 0;
+  const limit = S.user.tokens_limit || 100000;
+  const pct = limit > 0 ? Math.min(100, Math.round(used/limit*100)) : 0;
+  const fmt = n => n >= 1000 ? (n/1000).toFixed(1)+'k' : n;
+  document.getElementById('user-bar-wrap').innerHTML = `
+    <div class="user-bar">
+      <strong>${esc(S.user.email||'')}</strong>
+      <span style="font-size:10px;background:rgba(255,255,255,.15);padding:1px 6px;border-radius:8px;color:#fff">${S.user.role||'user'}</span>
+      <div style="margin-top:5px;font-size:11px">${fmt(used)} / ${fmt(limit)} tokens</div>
+      <div class="token-bar"><div class="token-fill" style="width:${pct}%"></div></div>
+    </div>`;
+}
+
 // --- AUTH API calls ---
 async function authFetch(path, opts={}) {
   if (!S.token) throw new Error('Not authenticated');
@@ -844,6 +859,163 @@ async function resetTok(uid){
   try{await authFetch('/api/admin/users/reset-tokens',{method:'POST',body:JSON.stringify({user_id:uid})});toast('Tokens resetados!');loadAdmin();}
   catch(e){toast('Erro: '+e.message,'err');}
 }
+
+
+
+
+// --- PERSONAS ---
+async function loadPersonalities(){
+  if(!S.token||!S.backendUrl)return;
+  const r=await authFetch('/api/personalities');
+  const data=await r.json();
+  if(!r.ok) throw new Error(data.detail||'Erro ao carregar personalidades');
+  S.personas=Array.isArray(data.items)?data.items:[];
+  S.defaultPersonaId=data.default_id||null;
+  const currentExists=S.currentPersona && S.personas.some(p=>p.id===S.currentPersona);
+  if(!currentExists){
+    if(S.currentChat&&S.chats[S.currentChat]&&S.chats[S.currentChat].personaId&&S.personas.some(p=>p.id===S.chats[S.currentChat].personaId)){
+      S.currentPersona=S.chats[S.currentChat].personaId;
+    } else {
+      S.currentPersona=S.defaultPersonaId||null;
+    }
+  }
+  if(S.currentChat&&S.chats[S.currentChat]&&!S.chats[S.currentChat].personaId&&S.currentPersona){
+    S.chats[S.currentChat].personaId=S.currentPersona;
+  }
+  save();
+  renderPerOpts();
+  renderPerList();
+}
+async function openPersonas(){
+  try{
+    await loadPersonalities();
+    const isAdmin=S.user&&S.user.role==='admin';
+    document.getElementById('p-scope-wrap').style.display=isAdmin?'':'none';
+    document.getElementById('p-default-wrap').style.display=isAdmin?'':'none';
+    document.getElementById('m-per').style.display='flex';
+  }catch(e){toast('Erro ao carregar personalidades: '+e.message,'err');}
+}
+function renderPerList(){
+  const list=document.getElementById('per-list');
+  if(!S.personas.length){list.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhuma personalidade ainda.</div>';return;}
+  list.innerHTML=S.personas.map(p=>{
+    const prompt=p.system_prompt||'';
+    const meta=[p.scope==='global'?'Global':'Pessoal',p.is_default?'Padrao':'' ].filter(Boolean).join(' • ');
+    return `<div class="persona-item${S.currentPersona===p.id?' sel':''}">
+      <div style="flex:1"><div class="pn">${esc(p.name)}</div><div class="pd">${meta?esc(meta)+' — ':''}${esc(prompt.slice(0,90))}${prompt.length>90?'..':''}</div></div>
+      <button class="bs" style="padding:4px 10px;font-size:11px" onclick="usePer('${p.id}')">Usar</button>
+      ${p.can_delete?`<button class="bd" onclick="delPer('${p.id}')">X</button>`:''}
+    </div>`;
+  }).join('');
+}
+async function addPersona(){
+  const name=document.getElementById('p-name').value.trim();
+  const description=document.getElementById('p-desc').value.trim();
+  const prompt=document.getElementById('p-prompt').value.trim();
+  const isAdmin=S.user&&S.user.role==='admin';
+  const scope=isAdmin?(document.getElementById('p-scope').value||'personal'):'personal';
+  const isDefault=isAdmin&&scope==='global'?document.getElementById('p-default').checked:false;
+  if(!name||!prompt){toast('Preencha nome e instrucoes','err');return;}
+  try{
+    const r=await authFetch('/api/personalities',{
+      method:'POST',
+      body:JSON.stringify({name,description,system_prompt:prompt,scope,is_default:isDefault}),
+    });
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.detail||'Erro ao criar personalidade');
+    document.getElementById('p-name').value='';
+    document.getElementById('p-desc').value='';
+    document.getElementById('p-prompt').value='';
+    if(document.getElementById('p-default')) document.getElementById('p-default').checked=false;
+    await loadPersonalities();
+    toast('Personalidade criada!');
+  }catch(e){toast('Erro: '+e.message,'err');}
+}
+function usePer(id){
+  S.currentPersona=id||null;
+  document.getElementById('per-sel').value=S.currentPersona||'';
+  if(S.currentChat&&S.chats[S.currentChat]) S.chats[S.currentChat].personaId=S.currentPersona;
+  save();renderPerList();toast('Personalidade selecionada');
+}
+async function delPer(id){
+  try{
+    const r=await authFetch('/api/personalities/'+id,{method:'DELETE'});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.detail||'Erro ao remover personalidade');
+    if(S.currentPersona===id){S.currentPersona=S.defaultPersonaId||null;document.getElementById('per-sel').value=S.currentPersona||'';}
+    if(S.currentChat&&S.chats[S.currentChat]&&S.chats[S.currentChat].personaId===id){S.chats[S.currentChat].personaId=S.currentPersona;}
+    await loadPersonalities();
+    toast('Personalidade removida!');
+  }catch(e){toast('Erro: '+e.message,'err');}
+}
+function renderPerOpts(){
+  const sel=document.getElementById('per-sel');
+  const opts=S.personas.map(p=>{
+    const label=p.is_default?`${p.name} (padrao)`:p.name;
+    return `<option value="${p.id}">${esc(label)}</option>`;
+  }).join('');
+  sel.innerHTML='<option value="">Sem personalidade</option>'+opts;
+  sel.value=S.currentPersona||'';
+}
+function setPersona(v){
+  S.currentPersona=v||null;
+  if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;
+  save();
+}
+
+// --- ADMIN ---
+function openAdmin(){loadAdmin();document.getElementById('m-admin').style.display='flex';}
+async function loadAdmin(){
+  const cont=document.getElementById('admin-content');
+  cont.innerHTML='<div style="font-size:13px;color:var(--tx3)">Carregando...</div>';
+  try {
+    const r=await authFetch('/api/admin/users');
+    const users=await r.json();
+    if(!users.length){cont.innerHTML='<div style="font-size:13px;color:var(--tx3)">Nenhum usuario.</div>';return;}
+    const fmt=n=>n>=1000?(n/1000).toFixed(1)+'k':n;
+    cont.innerHTML=`<table class="admin-table">
+      <thead><tr><th>Email</th><th>Role</th><th>Tokens usados</th><th>Limite</th><th>Ativo</th><th>Acoes</th></tr></thead>
+      <tbody>${users.map(u=>{
+        const pct=u.tokens_limit>0?Math.min(100,Math.round(u.tokens_used/u.tokens_limit*100)):0;
+        const rb=u.role==='admin'?'rb-admin':u.role==='claude_user'?'rb-claude':'rb-user';
+        return `<tr>
+          <td style="font-size:13px">${esc(u.email||u.id.slice(0,8))}</td>
+          <td><select class="role-sel" onchange="updRole('${u.id}',this.value)">
+            <option value="user"${u.role==='user'?' selected':''}>user</option>
+            <option value="claude_user"${u.role==='claude_user'?' selected':''}>claude_user</option>
+            <option value="admin"${u.role==='admin'?' selected':''}>admin</option>
+          </select></td>
+          <td><div style="font-size:12px">${fmt(u.tokens_used)} (${pct}%)</div>
+            <div class="token-bar" style="width:120px;margin-top:3px"><div class="token-fill" style="width:${pct}%"></div></div></td>
+          <td><input type="number" style="width:80px;background:var(--sur2);border:1px solid var(--bdr);border-radius:6px;padding:4px 6px;font-size:12px;color:var(--tx)" value="${u.tokens_limit}" onchange="updLimit('${u.id}',this.value)" /></td>
+          <td><input type="checkbox" ${u.active?'checked':''} onchange="updActive('${u.id}',this.checked)" /></td>
+          <td><button class="bd" style="font-size:11px;padding:3px 8px" onclick="resetTok('${u.id}')">Reset tokens</button></td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+  } catch(e){cont.innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+e.message+'</div>';}
+}
+async function updRole(uid,role){
+  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,role})});toast('Role atualizada!');}
+  catch(e){toast('Erro: '+e.message,'err');}
+}
+async function updLimit(uid,lim){
+  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,tokens_limit:parseInt(lim)})});toast('Limite atualizado!');}
+  catch(e){toast('Erro: '+e.message,'err');}
+}
+async function updActive(uid,active){
+  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,active})});toast('Status atualizado!');}
+  catch(e){toast('Erro: '+e.message,'err');}
+}
+async function resetTok(uid){
+  if(!confirm('Resetar tokens deste usuario?'))return;
+  try{await authFetch('/api/admin/users/reset-tokens',{method:'POST',body:JSON.stringify({user_id:uid})});loadAdmin();toast('Tokens resetados!');}
+  catch(e){toast('Erro: '+e.message,'err');}
+}
+
+// --- CONFIG ---
+function openCfg(){document.getElementById('cfg-url').value=S.backendUrl||'';document.getElementById('m-cfg').style.display='flex';}
+function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().replace(/\/$/,'');save();cm('m-cfg');toast('Configuracoes salvas!');}
+
 
 
 // --- KB MODAL ---
