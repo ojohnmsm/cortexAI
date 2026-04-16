@@ -153,6 +153,7 @@ class ChatRequest(BaseModel):
     personality_id: Optional[str] = None
     use_knowledge: bool = False
     think: bool = False
+    conversation_id: Optional[str] = None
     attachment_ids: List[str] = []
 
 
@@ -1010,7 +1011,7 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
             touch_conversation(conversation["id"], {"provider": provider, "model": model})
             record_message_audit(conversation, len(persisted_messages) - 1, provider, model, chunks if used_kb else [])
         except Exception as exc:
-            logger.warning("chat persistence skipped: %s", exc)
+            logger.exception("chat persistence skipped: %s", exc)
 
     return {
         "reply": reply,
