@@ -94,8 +94,12 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .att-name{font-size:12px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
 .att-sub{font-size:11px;color:var(--tx3)}
 .att-del{border:none;background:transparent;color:var(--tx3);cursor:pointer;font-size:14px;line-height:1}
-.attach-btn{position:absolute;left:14px;bottom:14px;width:28px;height:28px;border-radius:50%;border:1px solid var(--bdr);background:#fff;color:var(--tx2);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}
+.attach-btn{position:absolute;left:12px;bottom:12px;width:30px;height:30px;border-radius:50%;border:1px solid var(--bdr);background:#fff;color:var(--tx2);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;z-index:2;box-shadow:0 1px 2px rgba(0,0,0,.05)}
 .attach-btn:hover{border-color:var(--vg);color:var(--vg)}
+.attach-btn.busy{pointer-events:none;opacity:.7}
+.upload-hint{max-width:740px;margin:0 auto 8px;padding:8px 10px;border:1px solid var(--bdr);background:var(--sur2);border-radius:10px;font-size:12px;color:var(--tx2);display:flex;align-items:center;gap:8px}
+.upload-hint .spinner{width:14px;height:14px;border:2px solid var(--bdr2);border-top-color:var(--vg);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
 .kb-btn.on{background:rgba(0,126,122,.1);border-color:var(--vg);color:var(--vg);}
 .kb-dot{width:7px;height:7px;border-radius:50%;background:var(--bdr2);transition:background .15s;}
@@ -152,7 +156,7 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
   60%,100%{left:130%}
 }
 /* texto muda no estado ativo */
-.think-btn.on .t-label::after{content:'';}
+.think-btn.on .t-label::after{content:'ando';}
 
 /* MESSAGES */
 #msgs-wrap{flex:1;overflow-y:auto;padding:24px 0;scroll-behavior:smooth;}
@@ -197,7 +201,7 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .inp-top{max-width:740px;margin:0 auto 8px;display:flex;align-items:center;gap:8px;}
 .ps-wrap{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx3);font-weight:500;}
 #per-sel{background:var(--sur2);border:1px solid var(--bdr);color:var(--tx2);padding:4px 8px;border-radius:6px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:500;cursor:pointer;outline:none;max-width:170px;}
-.inp-row{max-width:740px;margin:0 auto;display:flex;align-items:flex-end;gap:10px;background:var(--sur2);border:2px solid var(--bdr);border-radius:14px;padding:10px 12px;transition:border-color .2s;}
+.inp-row{position:relative;max-width:740px;margin:0 auto;display:flex;align-items:flex-end;gap:10px;background:var(--sur2);border:2px solid var(--bdr);border-radius:14px;padding:10px 12px 10px 52px;transition:border-color .2s;}
 .inp-row:focus-within{border-color:var(--vg);}
 #msg-in{flex:1;background:none;border:none;outline:none;color:var(--tx);font-size:14px;font-family:'ValeSans',sans-serif;resize:none;max-height:160px;line-height:1.5;}
 #msg-in::placeholder{color:var(--tx3);}
@@ -348,7 +352,11 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
         <select id="per-sel" onchange="setPersona(this.value)"><option value="">Sem personalidade</option></select>
       </div>
     </div>
+    <div id="attachment-list" class="attachment-list"></div>
+    <div id="chat-upload-status" class="upload-hint" style="display:none"></div>
     <div class="inp-row">
+      <button class="attach-btn" id="attach-btn" onclick="pickChatFile()" title="Anexar arquivo">+</button>
+      <input type="file" id="chat-file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,image/*" style="display:none" onchange="uploadChatAttachment()">
       <textarea id="msg-in" rows="1" placeholder="Escreva sua mensagem..." onkeydown="handleKey(event)" oninput="ar(this)"></textarea>
       <button id="send-btn" onclick="send()">&#x2191;</button>
     </div>
@@ -456,6 +464,8 @@ let S = {
   globalRules:{system_prompt:'',is_active:true},
   useKB:false, think:false, sidebarOpen:true,
   pendingAttachments:[],
+  chatUploadInProgress:false,
+  kbUploadInProgress:false,
   token:null, user:null,
   loginTab:'login',
 };
@@ -602,6 +612,73 @@ async function authFetch(path, opts={}) {
   return r;
 }
 
+function setThinkLabel(){
+  const thinkBtn = document.getElementById('think-btn');
+  if(!thinkBtn) return;
+  const label = thinkBtn.querySelector('.t-label');
+  if(label) label.textContent = S.think ? 'Pensando' : 'Pensar';
+  thinkBtn.title = S.think ? 'Raciocínio avançado ativo' : 'Ativar raciocínio avançado';
+}
+function setChatUploadState(uploading, text='', progress=null){
+  S.chatUploadInProgress = !!uploading;
+  const box = document.getElementById('chat-upload-status');
+  const btn = document.getElementById('attach-btn');
+  if(btn) btn.classList.toggle('busy', !!uploading);
+  if(box){
+    if(uploading || text){
+      const pct = typeof progress === 'number' ? ` ${Math.round(progress)}%` : '';
+      box.innerHTML = `${uploading ? '<span class="spinner"></span>' : ''}<span>${esc(text || 'Enviando arquivo...')}${pct}</span>`;
+      box.style.display = 'flex';
+    }else{
+      box.innerHTML = '';
+      box.style.display = 'none';
+    }
+  }
+}
+function setKBUploadState(uploading, text='', progress=null){
+  S.kbUploadInProgress = !!uploading;
+  const bar = document.getElementById('pb');
+  const fill = document.getElementById('pf');
+  const status = document.getElementById('us');
+  if(bar) bar.style.display = uploading ? '' : 'none';
+  if(fill) fill.style.width = typeof progress === 'number' ? `${Math.max(0, Math.min(100, progress))}%` : (uploading ? '15%' : '0%');
+  if(status) status.textContent = text || '';
+  const zone = document.getElementById('uz');
+  if(zone) zone.style.pointerEvents = uploading ? 'none' : '';
+}
+
+async function readApiPayload(r){
+  const text = await r.text();
+  if(!text) return {};
+  try{ return JSON.parse(text); }catch(_){ return { detail:text }; }
+}
+
+function uploadWithProgress(url, file, onProgress){
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.responseType = 'json';
+    xhr.setRequestHeader('Authorization', 'Bearer ' + S.token);
+    xhr.upload.onprogress = (event) => {
+      if(event.lengthComputable && onProgress){
+        onProgress((event.loaded / event.total) * 100);
+      }
+    };
+    xhr.onload = () => {
+      let data = xhr.response;
+      if(!data){
+        try{ data = JSON.parse(xhr.responseText || '{}'); }catch(_){ data = {}; }
+      }
+      if(xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error((data && data.detail) || 'Erro ao enviar arquivo'));
+    };
+    xhr.onerror = () => reject(new Error('Falha de rede durante o upload'));
+    const fd = new FormData();
+    fd.append('file', file);
+    xhr.send(fd);
+  });
+}
+
 async function loadConversations(){
   if(!S.token)return;
   const r=await authFetch('/api/conversations');
@@ -708,10 +785,8 @@ function applyModelPolicyUI(){
     thinkBtn.style.display = (S.provider==='openai' && !isAdmin) ? '' : 'none';
     thinkBtn.className = 'think-btn'+(S.think ? ' on' : '');
     thinkBtn.setAttribute('aria-pressed', S.think ? 'true' : 'false');
-    const label = thinkBtn.querySelector('.t-label');
-    if(label) label.textContent = S.think ? 'Pensando' : 'Pensar';
-    thinkBtn.title = S.think ? 'Raciocínio avançado ativo' : 'Ativar raciocínio avançado';
   }
+  setThinkLabel();
 }
 function renderModels(){
   const sel=document.getElementById('model-sel');
@@ -781,8 +856,9 @@ async function loadChat(id){
   renderPerOpts();
   try{
     const r=await authFetch('/api/conversations/'+id+'/messages');
-    const data=await r.json();
+    const data=await readApiPayload(r);
     if(r.ok && Array.isArray(data.items)) c.messages=data.items;
+    else if(!r.ok) throw new Error(data.detail||'Erro ao carregar histórico');
   }catch(e){console.error(e);}
   await loadChatAttachments();
   renderMsgs(c.messages||[]);renderChats();save();
@@ -895,16 +971,16 @@ async function uploadChatAttachment(){
   if(!file) return;
   if(!S.currentChat||!S.chats[S.currentChat]){ toast('Abra uma conversa antes de anexar arquivos.','err'); return; }
   try{
-    const fd=new FormData();
-    fd.append('file', file);
+    setChatUploadState(true, 'Enviando anexo...');
     const url=getApiBase()+'/api/chat/attachments/upload?conversation_id='+encodeURIComponent(S.currentChat);
-    const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(data.detail||'Erro ao enviar anexo');
+    const data=await uploadWithProgress(url, file, (pct)=>setChatUploadState(true, 'Enviando anexo...', pct));
     S.pendingAttachments=[...(S.pendingAttachments||[]), data];
     renderAttachmentList();
+    setChatUploadState(false, 'Anexo enviado com sucesso.');
     toast('Anexo enviado!');
+    setTimeout(()=>setChatUploadState(false,''), 1200);
   }catch(e){
+    setChatUploadState(false,'');
     toast('Erro: '+e.message,'err');
   }finally{
     if(inp) inp.value='';
@@ -928,6 +1004,7 @@ async function send(){
   const text=input.value.trim();
   const attachmentIds=currentChatAttachmentIds();
   if(!text && !attachmentIds.length)return;
+  if(S.chatUploadInProgress){toast('Aguarde o envio do anexo terminar.','err');return;}
   if(!S.token){toast('Faca login primeiro','err');return;}
   if(!S.currentChat||!S.chats[S.currentChat]){
     await newChat();
@@ -949,14 +1026,14 @@ async function send(){
       body:JSON.stringify({
         provider:S.provider,model:effectiveModel,
         think:!!S.think,
-        conversation_id: chat.id,
+        conversation_id:chat.id,
         messages:chat.messages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role,content:m.content})),
         personality_id:S.currentPersona||null,
         use_knowledge:S.useKB,
         attachment_ids:attachmentIds,
       }),
     });
-    const data=await r.json();
+    const data=await readApiPayload(r);
     if(!r.ok) throw new Error(data.detail||'Erro ao enviar');
     rmThink();
     const aMsg={role:'assistant',content:data.reply||'',time:Date.now(),provider:S.provider,model:effectiveModel,usedKB:!!data.used_knowledge,tokens:data.tokens?.total||null};
@@ -1231,13 +1308,41 @@ async function loadDocs(){
   }catch(e){ box.innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+esc(e.message)+'</div>'; }
 }
 
-async function uploadDoc(fileArg){
-  const inp=document.getElementById('fi') || document.getElementById('doc-file');
-  const file=fileArg || (inp&&inp.files?inp.files[0]:null);
+function kbUploadInput(){
+  return document.getElementById('fi') || document.getElementById('doc-file');
+}
+
+async function uploadFile(file){
+  return uploadDoc(file||null);
+}
+
+function onDrop(event){
+  event.preventDefault();
   const zone=document.getElementById('uz');
   if(zone) zone.classList.remove('drag');
-  if(!file){ toast('Selecione um arquivo','err'); return; }
-  const fd=new FormData(); fd.append('file',file);
+  const file=event.dataTransfer&&event.dataTransfer.files&&event.dataTransfer.files[0] ? event.dataTransfer.files[0] : null;
+  if(!file){
+    toast('Nenhum arquivo selecionado','err');
+    return;
+  }
+  uploadDoc(file);
+}
+
+async function uploadDoc(file=null){
+  const inp=kbUploadInput();
+  const picked=file || (inp&&inp.files?inp.files[0]:null);
+  if(!picked){ toast('Selecione um arquivo','err'); return; }
+  const zone=document.getElementById('uz');
+  const box=document.getElementById('doc-list');
+  const prevZone=zone?zone.innerHTML:null;
+  if(zone){
+    zone.classList.add('drag');
+    zone.innerHTML='<div style="text-align:center;color:var(--tx2)"><div style="font-weight:700;margin-bottom:6px">Enviando arquivo...</div><div style="font-size:12px">'+esc(picked.name)+'</div></div>';
+  }
+  if(box){
+    box.insertAdjacentHTML('afterbegin','<div id="kb-uploading" style="font-size:13px;color:var(--tx3);margin-bottom:8px">Enviando <b>'+esc(picked.name)+'</b>...</div>');
+  }
+  const fd=new FormData(); fd.append('file',picked);
   try{
     const url=getApiBase()+'/api/knowledge/upload';
     const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
@@ -1246,19 +1351,16 @@ async function uploadDoc(fileArg){
     if(inp) inp.value='';
     toast('Documento enviado!');
     await loadDocs();
-  }catch(e){ toast('Erro: '+e.message,'err'); }
-}
-
-function uploadFile(file){
-  return uploadDoc(file);
-}
-
-function onDrop(event){
-  event.preventDefault();
-  const zone=document.getElementById('uz');
-  if(zone) zone.classList.remove('drag');
-  const file=event?.dataTransfer?.files?.[0] || null;
-  if(file) uploadDoc(file);
+  }catch(e){
+    toast('Erro: '+e.message,'err');
+  }finally{
+    const uploading=document.getElementById('kb-uploading');
+    if(uploading) uploading.remove();
+    if(zone){
+      zone.classList.remove('drag');
+      if(prevZone!=null) zone.innerHTML=prevZone;
+    }
+  }
 }
 
 async function delDoc(id){
