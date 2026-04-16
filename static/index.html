@@ -261,6 +261,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
       <button class="prov-btn" id="btn-openai" onclick="setProv('openai')">ChatGPT</button>
     </div>
     <select id="model-sel" onchange="setModel(this.value)"></select>
+    <button id="think-btn" class="think-btn" onclick="toggleThink()"><span aria-hidden="true">✦</span><span>Pensar</span></button>
     <button id="kb-btn" class="kb-btn" onclick="toggleKB()"><div class="kb-dot"></div>Base</button>
     <button class="btil" onclick="clearChat()">&#x232B;</button>
   </div>
@@ -377,7 +378,7 @@ const MODELS = {
     {id:'claude-3-5-haiku-20241022',l:'Claude 3.5 Haiku'},
   ],
   openai:[
-    {id:'gpt-5.4-thinking',l:'GPT-5.4 Thinking'},{id:'gpt-5.4-nano',l:'GPT-5.4 nano'},
+    {id:'gpt-5.4-nano',l:'GPT-5.4 nano'},
     {id:'gpt-4o',l:'GPT-4o'},{id:'gpt-4o-mini',l:'GPT-4o mini'},
     {id:'gpt-4-turbo',l:'GPT-4 Turbo'},{id:'gpt-4',l:'GPT-4'},
     {id:'gpt-3.5-turbo',l:'GPT-3.5 Turbo'},{id:'o1',l:'o1'},{id:'o1-mini',l:'o1-mini'},
@@ -553,7 +554,7 @@ async function loadConversations(){
       title:item.title||'Novo chat',
       messages:Array.isArray(item.messages)?item.messages:[],
       provider:item.provider||'openai',
-      model:item.model||'gpt-5.4-nano',
+      model:item.model||'gpt-4o',
       personaId:item.personality_id||null,
       useKB:!!item.use_knowledge,
       createdAt:item.created_at||null,
@@ -617,10 +618,10 @@ async function setProv(p, sv=true) {
   if(sv){
     if(p==='openai' && S.user && S.user.role!=='admin'){
       S.model = S.think ? 'gpt-4o' : 'gpt-5.4-nano';
-    } else {
+    }else{
       S.model=MODELS[p][0].id;
     }
-    document.getElementById('model-sel').value=S.model;
+    document.getElementById('model-sel').value=getEffectiveUserModel();
     if(S.currentChat&&S.chats[S.currentChat]){
       S.chats[S.currentChat].provider=S.provider;
       S.chats[S.currentChat].model=S.model;
@@ -645,6 +646,7 @@ function applyModelPolicyUI(){
   if(thinkBtn){
     thinkBtn.style.display = (S.provider==='openai' && !isAdmin) ? '' : 'none';
     thinkBtn.className = 'think-btn'+(S.think ? ' on' : '');
+    thinkBtn.setAttribute('aria-pressed', S.think ? 'true' : 'false');
   }
 }
 function renderModels(){
@@ -687,8 +689,8 @@ async function toggleThink(){
       S.chats[S.currentChat].model=S.model;
       save();
       try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
-    } else save();
-  } else {
+    }else save();
+  }else{
     save();
   }
   renderModels();
@@ -797,7 +799,7 @@ async function send(){
   const chat=S.chats[S.currentChat];
   const effectiveModel=getEffectiveUserModel();
   chat.provider=S.provider;chat.model=effectiveModel;chat.personaId=S.currentPersona;chat.useKB=S.useKB;
-  const uMsg={role:'user',content:text,time:Date.now(),provider:S.provider,model:getEffectiveUserModel()};
+  const uMsg={role:'user',content:text,time:Date.now(),provider:S.provider,model:effectiveModel};
   chat.messages.push(uMsg);
   if(chat.messages.length===1){chat.title=text.slice(0,38)+(text.length>38?'..':'');document.getElementById('chat-title').textContent=chat.title;renderChats();}
   input.value='';ar(input);
@@ -808,8 +810,7 @@ async function send(){
     const r=await authFetch('/api/chat',{
       method:'POST',
       body:JSON.stringify({
-        provider:S.provider,model:effectiveModel,
-        think:!!S.think,
+        provider:S.provider,model:S.model,
         messages:chat.messages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role,content:m.content})),
         personality_id:S.currentPersona||null,
         use_knowledge:S.useKB,
@@ -1069,6 +1070,50 @@ function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().
 
 // --- KB MODAL ---
 function openKnowledge(){loadDocs();document.getElementById('m-kb').style.display='flex';}
+
+
+async function loadDocs(){
+  const box=document.getElementById('doc-list');
+  if(!box) return;
+  box.innerHTML='<div style="font-size:13px;color:var(--tx3)">Carregando...</div>';
+  try{
+    const r=await authFetch('/api/knowledge/documents');
+    const docs=await r.json();
+    if(!r.ok) throw new Error(docs.detail||'Erro ao carregar documentos');
+    if(!Array.isArray(docs)||!docs.length){ box.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhum documento enviado.</div>'; return; }
+    box.innerHTML=docs.map(d=>{
+      const canDelete=S.user&&(S.user.role==='admin'||d.uploaded_by===S.user.id);
+      const meta=[d.chunk_count!=null?`${d.chunk_count} chunks`:null,d.uploaded_by_email||null].filter(Boolean).join(' • ');
+      return `<div class="persona-item"><div style="flex:1"><div class="pn">${esc(d.name||'Documento')}</div><div class="pd">${esc(meta)}</div></div>${canDelete?`<button class="bd" onclick="delDoc('${d.id}')">X</button>`:''}</div>`;
+    }).join('');
+  }catch(e){ box.innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+esc(e.message)+'</div>'; }
+}
+
+async function uploadDoc(){
+  const inp=document.getElementById('doc-file');
+  const file=inp&&inp.files?inp.files[0]:null;
+  if(!file){ toast('Selecione um arquivo','err'); return; }
+  const fd=new FormData(); fd.append('file',file);
+  try{
+    const url=S.backendUrl.replace(/\/$/,'')+'/api/knowledge/upload';
+    const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.detail||'Erro ao enviar documento');
+    inp.value='';
+    toast('Documento enviado!');
+    await loadDocs();
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+}
+
+async function delDoc(id){
+  try{
+    const r=await authFetch('/api/knowledge/documents/'+id,{method:'DELETE'});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.detail||'Erro ao excluir documento');
+    toast('Documento removido!');
+    await loadDocs();
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+}
 
 // --- HELPERS ---
 function toggleSB(){S.sidebarOpen=!S.sidebarOpen;document.getElementById('sidebar').classList.toggle('collapsed',!S.sidebarOpen);}
