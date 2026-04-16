@@ -192,6 +192,14 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
 #toast{position:fixed;bottom:22px;right:22px;background:var(--vg);border-radius:8px;padding:10px 18px;font-size:13px;font-weight:500;color:#fff;z-index:200;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;}
 #toast.show{opacity:1;transform:translateY(0);}
 #toast.err{background:var(--vc);}
+.pw-hint{display:none;margin-top:8px;padding:10px 12px;border:1px solid var(--bdr);border-radius:10px;background:var(--sur2);}
+.pw-hint.show{display:block;}
+.pw-hint-title{font-size:12px;color:var(--tx2);margin-bottom:6px;font-weight:600;}
+.pw-checks{display:flex;flex-direction:column;gap:4px;}
+.pw-check{font-size:12px;color:var(--tx3);}
+.pw-check.ok{color:var(--vg);font-weight:600;}
+.admin-box{margin-top:14px;padding-top:14px;border-top:1px solid var(--bdr);}
+.admin-box textarea{min-height:160px;}
 </style>
 </head>
 <body>
@@ -209,6 +217,16 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
     <div class="lfield"><label>E-mail</label><input type="text" id="l-email" placeholder="seu@email.com" /></div>
     <div class="lfield"><label>Senha</label><input type="password" id="l-pass" placeholder="Senha" onkeydown="if(event.key==='Enter')doLogin()" /></div>
     <div class="lfield" id="l-pass2-wrap" style="display:none"><label>Confirmar senha</label><input type="password" id="l-pass2" placeholder="Repita a senha" /></div>
+    <div id="pw-hint" class="pw-hint">
+      <div class="pw-hint-title">A senha deve conter:</div>
+      <div class="pw-checks">
+        <div id="pw-len" class="pw-check">• No mínimo 8 caracteres</div>
+        <div id="pw-low" class="pw-check">• 1 letra minúscula</div>
+        <div id="pw-up" class="pw-check">• 1 letra maiúscula</div>
+        <div id="pw-num" class="pw-check">• 1 número</div>
+        <div id="pw-spec" class="pw-check">• 1 caractere especial</div>
+      </div>
+    </div>
     <button class="login-btn" id="login-btn" onclick="doLogin()">Entrar</button>
   </div>
 </div>
@@ -328,10 +346,17 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
   <div class="modal" style="width:680px">
     <div class="mhd"><div class="mt">&#128272; Painel Admin</div><button class="btil" onclick="cm('m-admin')">X</button></div>
     <div class="mbd">
-      <div class="info-b">Gerencie usuarios, roles e limites de tokens.</div>
+      <div class="info-b">Gerencie usuarios, roles, limites de tokens e regras globais do chat.</div>
       <div style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Roles: admin = acesso total | claude_user = acesso ao Claude | user = apenas ChatGPT</div>
       <div id="admin-content" style="overflow-x:auto">
         <div style="font-size:13px;color:var(--tx3);font-style:italic">Carregando usuarios...</div>
+      </div>
+      <div class="admin-box">
+        <div style="font-size:11px;color:var(--tx3);font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Regras globais do chat</div>
+        <div style="font-size:12px;color:var(--tx3);margin-bottom:8px">Essas instruções são aplicadas antes da personalidade e da base de conhecimento.</div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="gr-active" checked /> Regras globais ativas</label>
+        <textarea id="gr-prompt" placeholder="Ex.: Responda sempre em português do Brasil. Nunca invente dados. Ao usar a base, cite o documento utilizado quando possível."></textarea>
+        <div style="display:flex;justify-content:flex-end;margin-top:10px"><button class="bp" onclick="saveGlobalRules()">Salvar regras globais</button></div>
       </div>
     </div>
     <div class="mft"><button class="bs" onclick="cm('m-admin')">Fechar</button><button class="bp" onclick="loadAdmin()">&#x21bb; Atualizar</button></div>
@@ -362,6 +387,7 @@ let S = {
   chats:{}, currentChat:null,
   personas:[], currentPersona:null,
   defaultPersonaId:null,
+  globalRules:{system_prompt:'',is_active:true},
   useKB:false, sidebarOpen:true,
   token:null, user:null,
   loginTab:'login',
@@ -371,12 +397,48 @@ const save = () => localStorage.setItem('cortex-ai', JSON.stringify(S));
 const load = () => { try { const d=JSON.parse(localStorage.getItem('cortex-ai')); if(d) S={...S,...d}; } catch(e){} };
 
 // --- AUTH ---
+function passwordChecks(v){
+  const pass = String(v || '');
+  return {
+    len: pass.length >= 8,
+    low: /[a-z]/.test(pass),
+    up: /[A-Z]/.test(pass),
+    num: /\d/.test(pass),
+    spec: /[^A-Za-z0-9]/.test(pass),
+  };
+}
+function passwordValid(v){
+  const c = passwordChecks(v);
+  return c.len && c.low && c.up && c.num && c.spec;
+}
+function updatePasswordHints(){
+  const isReg = S.loginTab === 'register';
+  const wrap = document.getElementById('pw-hint');
+  if (!wrap) return;
+  wrap.classList.toggle('show', isReg);
+  if (!isReg) return;
+  const c = passwordChecks(document.getElementById('l-pass').value || '');
+  [['pw-len', c.len], ['pw-low', c.low], ['pw-up', c.up], ['pw-num', c.num], ['pw-spec', c.spec]].forEach(([id, ok]) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('ok', ok);
+  });
+}
+function translateAuthError(msg){
+  const t = String(msg || 'Erro ao autenticar');
+  if (t.includes('Password should contain')) return 'Senha inválida. Use pelo menos 8 caracteres, com letra maiúscula, letra minúscula, número e caractere especial.';
+  if (t.includes('Invalid login credentials')) return 'Email ou senha inválidos.';
+  if (t.includes('User already registered')) return 'Este email já está cadastrado.';
+  if (t.includes('Email not confirmed')) return 'Conta criada, mas o email ainda não foi confirmado.';
+  if (t.includes('Registration is restricted')) return 'O cadastro é restrito a emails @vale.com.';
+  return t;
+}
 function setLoginTab(t) {
   S.loginTab = t;
   document.querySelectorAll('.ltab').forEach((el,i)=>el.classList.toggle('active',(i===0&&t==='login')||(i===1&&t==='register')));
   document.getElementById('l-pass2-wrap').style.display = t==='register' ? '' : 'none';
   document.getElementById('login-btn').textContent = t==='register' ? 'Criar conta' : 'Entrar';
   document.getElementById('login-err').style.display='none';
+  updatePasswordHints();
 }
 
 async function doLogin() {
@@ -393,6 +455,7 @@ async function doLogin() {
   if (isReg) {
     const pass2 = document.getElementById('l-pass2').value;
     if (pass !== pass2) { errEl.textContent='As senhas nao conferem.'; errEl.style.display='block'; return; }
+    if (!passwordValid(pass)) { errEl.textContent='A senha precisa atender aos requisitos exibidos abaixo.'; errEl.style.display='block'; updatePasswordHints(); return; }
   }
   document.getElementById('login-btn').textContent = 'Aguarde...';
   document.getElementById('login-btn').disabled = true;
@@ -408,9 +471,9 @@ async function doLogin() {
     S.token = data.access_token;
     S.user = data.user;
     save();
-    afterLogin();
+    await afterLogin();
   } catch(err) {
-    errEl.textContent = err.message;
+    errEl.textContent = translateAuthError(err.message);
     errEl.style.display='block';
   }
   document.getElementById('login-btn').textContent = isReg ? 'Criar conta' : 'Entrar';
@@ -420,54 +483,32 @@ async function doLogin() {
 async function afterLogin() {
   document.getElementById('login-screen').style.display='none';
   renderUserBar();
-  // Show admin btn if admin
-  if (S.user && S.user.role === 'admin') {
-    document.getElementById('admin-btn').style.display='';
-  }
-  // Restrict Claude if not allowed
+  if (S.user && S.user.role === 'admin') document.getElementById('admin-btn').style.display='';
   if (S.user && !['admin','claude_user'].includes(S.user.role)) {
     document.getElementById('btn-claude').disabled = true;
     document.getElementById('btn-claude').title = 'Sem acesso ao Claude. Contate o administrador.';
     if (S.provider === 'claude') { S.provider='openai'; }
+  } else {
+    document.getElementById('btn-claude').disabled = false;
+    document.getElementById('btn-claude').title = '';
   }
   renderModels();
   setProv(S.provider, false);
   document.getElementById('model-sel').value = S.model;
-  try { await loadPersonalities(); } catch (e) { console.error(e); }
-  try { await loadConversations(); } catch (e) { console.error(e); toast('Erro ao carregar historico: '+e.message,'err'); }
+  try { await Promise.all([loadPersonalities(), loadConversations()]); } catch (e) { console.error(e); }
   renderChats();
   updateKBBtn();
   if (S.currentChat && S.chats[S.currentChat]) loadChat(S.currentChat);
-  else {
-    S.currentPersona = S.defaultPersonaId || null;
-    renderPerOpts();
-    showEmpty();
-  }
+  else renderPerOpts();
 }
 
 function doLogout() {
   S.token = null; S.user = null; S.chats={}; S.currentChat=null;
   S.personas = []; S.currentPersona = null; S.defaultPersonaId = null;
-  S.useKB = false;
   save();
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('admin-btn').style.display='none';
   showEmpty();
-}
-
-function renderUserBar() {
-  if (!S.user) return;
-  const used = S.user.tokens_used || 0;
-  const limit = S.user.tokens_limit || 100000;
-  const pct = limit > 0 ? Math.min(100, Math.round(used/limit*100)) : 0;
-  const fmt = n => n >= 1000 ? (n/1000).toFixed(1)+'k' : n;
-  document.getElementById('user-bar-wrap').innerHTML = `
-    <div class="user-bar">
-      <strong>${esc(S.user.email||'')}</strong>
-      <span style="font-size:10px;background:rgba(255,255,255,.15);padding:1px 6px;border-radius:8px;color:#fff">${S.user.role||'user'}</span>
-      <div style="margin-top:5px;font-size:11px">${fmt(used)} / ${fmt(limit)} tokens</div>
-      <div class="token-bar"><div class="token-fill" style="width:${pct}%"></div></div>
-    </div>`;
 }
 
 // --- AUTH API calls ---
@@ -482,26 +523,27 @@ async function authFetch(path, opts={}) {
   return r;
 }
 
-
 async function loadConversations(){
-  if(!S.token||!S.backendUrl){S.chats={};S.currentChat=null;return;}
+  if(!S.token||!S.backendUrl)return;
   const r=await authFetch('/api/conversations');
   const data=await r.json();
   if(!r.ok) throw new Error(data.detail||'Erro ao carregar conversas');
-  const chats={};
-  (Array.isArray(data)?data:[]).forEach(c=>{
-    chats[c.id]={
-      id:c.id,
-      title:c.title||'Novo chat',
-      messages:Array.isArray(c.messages)?c.messages:[],
-      provider:c.provider||'openai',
-      model:c.model||S.model,
-      personaId:c.personality_id||null,
-      useKB:!!c.use_knowledge,
+  const items=Array.isArray(data.items)?data.items:[];
+  S.chats={};
+  items.forEach(item=>{
+    S.chats[item.id]={
+      id:item.id,
+      title:item.title||'Novo chat',
+      messages:Array.isArray(item.messages)?item.messages:[],
+      provider:item.provider||'openai',
+      model:item.model||'gpt-4o',
+      personaId:item.personality_id||null,
+      useKB:!!item.use_knowledge,
+      createdAt:item.created_at||null,
+      updatedAt:item.updated_at||null,
     };
   });
-  S.chats=chats;
-  if(S.currentChat && !S.chats[S.currentChat]) S.currentChat=null;
+  if(S.currentChat&&!S.chats[S.currentChat]) S.currentChat=null;
   if(!S.currentChat){
     const ids=Object.keys(S.chats);
     if(ids.length) S.currentChat=ids[0];
@@ -509,15 +551,15 @@ async function loadConversations(){
   save();
 }
 
-async function createChatRemote(){
+async function createConversationRemote(chat){
   const r=await authFetch('/api/conversations',{
     method:'POST',
     body:JSON.stringify({
-      title:'Novo chat',
-      provider:S.provider,
-      model:S.model,
-      personality_id:S.currentPersona||null,
-      use_knowledge:S.useKB,
+      title:chat.title||'Novo chat',
+      provider:chat.provider||S.provider,
+      model:chat.model||S.model,
+      personality_id:chat.personaId||null,
+      use_knowledge:!!chat.useKB,
     }),
   });
   const data=await r.json();
@@ -525,53 +567,45 @@ async function createChatRemote(){
   return data;
 }
 
-async function saveConversationMeta(chatId){
-  const chat=S.chats[chatId];
-  if(!chat||!S.token) return;
-  const r=await authFetch('/api/conversations/'+chatId,{
+async function syncConversationMeta(chat){
+  if(!S.token||!S.backendUrl||!chat||!chat.id) return;
+  await authFetch('/api/conversations/'+chat.id,{
     method:'PUT',
     body:JSON.stringify({
       title:chat.title||'Novo chat',
       provider:chat.provider||S.provider,
       model:chat.model||S.model,
       personality_id:chat.personaId||null,
-      use_knowledge:typeof chat.useKB==='boolean'?chat.useKB:S.useKB,
+      use_knowledge:!!chat.useKB,
     }),
   });
-  const data=await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(data.detail||'Erro ao salvar conversa');
 }
 
-async function saveConversationMessages(chatId){
-  const chat=S.chats[chatId];
-  if(!chat||!S.token) return;
-  const r=await authFetch('/api/conversations/'+chatId+'/messages',{
+async function syncConversationMessages(chat){
+  if(!S.token||!S.backendUrl||!chat||!chat.id) return;
+  await authFetch('/api/conversations/'+chat.id+'/messages',{
     method:'PUT',
-    body:JSON.stringify({messages:(chat.messages||[]).map(m=>(
-      {role:m.role,content:m.content,time:m.time||null,provider:m.provider||null,model:m.model||null,usedKB:!!m.usedKB,tokens:m.tokens||0}
-    ))}),
+    body:JSON.stringify({messages:(chat.messages||[]).map(m=>({
+      role:m.role, content:m.content, time:m.time||Date.now(), provider:m.provider||chat.provider||S.provider, usedKB:!!m.usedKB, tokens:m.tokens||null
+    }))}),
   });
-  const data=await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(data.detail||'Erro ao salvar mensagens');
-}
-
-function syncCurrentChatMeta(){
-  if(S.currentChat&&S.chats[S.currentChat]){
-    saveConversationMeta(S.currentChat).catch(e=>console.error('saveConversationMeta',e));
-  }
 }
 
 // --- PROVIDER / MODEL ---
-function setProv(p, sv=true) {
+async function setProv(p, sv=true) {
   S.provider=p;
   document.getElementById('btn-claude').className='prov-btn'+(p==='claude'?' ac':'');
   document.getElementById('btn-openai').className='prov-btn'+(p==='openai'?' ao':'');
   renderModels();
-  if(sv){S.model=MODELS[p][0].id;document.getElementById('model-sel').value=S.model;save();}
-  if(S.currentChat&&S.chats[S.currentChat]){
-    S.chats[S.currentChat].provider=S.provider;
-    S.chats[S.currentChat].model=S.model;
-    syncCurrentChatMeta();
+  if(sv){
+    S.model=MODELS[p][0].id;
+    document.getElementById('model-sel').value=S.model;
+    if(S.currentChat&&S.chats[S.currentChat]){
+      S.chats[S.currentChat].provider=S.provider;
+      S.chats[S.currentChat].model=S.model;
+      save();
+      try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
+    }else save();
   }
 }
 function renderModels(){
@@ -579,54 +613,64 @@ function renderModels(){
   sel.innerHTML=MODELS[S.provider].map(m=>`<option value="${m.id}">${m.l}</option>`).join('');
   sel.value=S.model;
 }
-function setModel(v){S.model=v; if(S.currentChat&&S.chats[S.currentChat]){S.chats[S.currentChat].model=v; syncCurrentChatMeta();} save();}
-function toggleKB(){S.useKB=!S.useKB; if(S.currentChat&&S.chats[S.currentChat]) S.chats[S.currentChat].useKB=S.useKB; updateKBBtn(); syncCurrentChatMeta(); save();}
+async function setModel(v){
+  S.model=v;
+  if(S.currentChat&&S.chats[S.currentChat]){
+    S.chats[S.currentChat].model=v;
+    save();
+    try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
+  }else save();
+}
+async function toggleKB(){
+  S.useKB=!S.useKB;
+  updateKBBtn();
+  if(S.currentChat&&S.chats[S.currentChat]){
+    S.chats[S.currentChat].useKB=S.useKB;
+    save();
+    try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
+  }else save();
+}
 function updateKBBtn(){const b=document.getElementById('kb-btn');b.className='kb-btn'+(S.useKB?' on':'');}
 
 // --- CHATS ---
 async function newChat(){
-  if(!S.token){toast('Faca login primeiro','err');return null;}
-  const data=await createChatRemote();
-  const id=data.id;
-  S.chats[id]={id,title:data.title||'Novo chat',messages:[],provider:data.provider||S.provider,model:data.model||S.model,personaId:data.personality_id||S.currentPersona||null,useKB:!!data.use_knowledge};
-  S.currentChat=id;save();renderChats();loadChat(id);return S.chats[id];
+  const temp={title:'Novo chat',messages:[],provider:S.provider,model:S.model,personaId:S.currentPersona,useKB:S.useKB};
+  try{
+    const created=await createConversationRemote(temp);
+    S.chats[created.id]={id:created.id,title:created.title||'Novo chat',messages:created.messages||[],provider:created.provider||S.provider,model:created.model||S.model,personaId:created.personality_id||S.currentPersona,useKB:!!created.use_knowledge};
+    S.currentChat=created.id;
+    save();renderChats();loadChat(created.id);
+  }catch(e){toast('Erro ao criar conversa: '+e.message,'err');}
 }
 function loadChat(id){
   S.currentChat=id;const c=S.chats[id];if(!c)return;
   document.getElementById('chat-title').textContent=c.title;
   setProv(c.provider||S.provider,false);S.model=c.model||S.model;
   document.getElementById('model-sel').value=S.model;
-  S.useKB=typeof c.useKB==='boolean'?c.useKB:S.useKB;
-  S.currentPersona=c.personaId||S.defaultPersonaId||null;
+  S.currentPersona=c.personaId||null;
+  S.useKB=!!c.useKB;
   updateKBBtn();
   renderPerOpts();
   renderMsgs(c.messages||[]);renderChats();save();
 }
 async function delChat(id,e){
   e.stopPropagation();
-  try{
-    const r=await authFetch('/api/conversations/'+id,{method:'DELETE'});
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(data.detail||'Erro ao excluir conversa');
-    delete S.chats[id];
-    if(S.currentChat===id){
-      const ids=Object.keys(S.chats).reverse();
-      S.currentChat=ids.length?ids[0]:null;
-      if(S.currentChat) loadChat(S.currentChat); else showEmpty();
-    }
-    save();renderChats();
-  }catch(err){toast('Erro: '+err.message,'err');}
+  try{await authFetch('/api/conversations/'+id,{method:'DELETE'});}catch(err){console.error(err);}
+  delete S.chats[id];
+  if(S.currentChat===id){S.currentChat=Object.keys(S.chats)[0]||null; if(S.currentChat) loadChat(S.currentChat); else showEmpty();}
+  save();renderChats();
 }
 async function clearChat(){
   if(!S.currentChat)return;
-  S.chats[S.currentChat].messages=[];
+  const chat=S.chats[S.currentChat];
+  chat.messages=[];
   renderMsgs([]);
   save();
-  try{await saveConversationMessages(S.currentChat);}catch(err){toast('Erro ao limpar chat: '+err.message,'err');}
+  try{await syncConversationMessages(chat);}catch(e){toast('Erro ao limpar: '+e.message,'err');}
 }
 function renderChats(){
   const list=document.getElementById('chat-list');
-  const ids=Object.keys(S.chats).reverse();
+  const ids=Object.keys(S.chats).sort((a,b)=>((S.chats[b].updatedAt||0) > (S.chats[a].updatedAt||0)?1:-1));
   if(!ids.length){list.innerHTML='<div style="padding:8px 14px;font-size:12px;color:rgba(255,255,255,.4);font-style:italic">Nenhuma conversa ainda</div>';return;}
   list.innerHTML=ids.map(id=>{
     const c=S.chats[id];
@@ -685,23 +729,19 @@ async function send(){
   if(!S.backendUrl){toast('Configure a URL do backend em ⚙','err');openCfg();return;}
   if(!S.token){toast('Faca login primeiro','err');return;}
   if(!S.currentChat||!S.chats[S.currentChat]){
-    try{await newChat();}catch(err){toast('Erro ao criar chat: '+err.message,'err');return;}
+    await newChat();
+    if(!S.currentChat||!S.chats[S.currentChat]) return;
   }
   const chat=S.chats[S.currentChat];
-  chat.provider=S.provider;chat.model=S.model;chat.useKB=S.useKB;chat.personaId=S.currentPersona||null;
-  const uMsg={role:'user',content:text,time:Date.now()};
+  chat.provider=S.provider;chat.model=S.model;chat.personaId=S.currentPersona;chat.useKB=S.useKB;
+  const uMsg={role:'user',content:text,time:Date.now(),provider:S.provider};
   chat.messages.push(uMsg);
-  if(chat.messages.length===1){
-    chat.title=text.slice(0,38)+(text.length>38?'..':'');
-    document.getElementById('chat-title').textContent=chat.title;
-    renderChats();
-    try{await saveConversationMeta(S.currentChat);}catch(err){console.error(err);}
-  }
+  if(chat.messages.length===1){chat.title=text.slice(0,38)+(text.length>38?'..':'');document.getElementById('chat-title').textContent=chat.title;renderChats();}
   input.value='';ar(input);
   document.getElementById('send-btn').disabled=true;
   appendMsg(uMsg);showThink();save();
   try {
-    await saveConversationMessages(S.currentChat);
+    await syncConversationMeta(chat);
     const r=await authFetch('/api/chat',{
       method:'POST',
       body:JSON.stringify({
@@ -712,175 +752,57 @@ async function send(){
       }),
     });
     const data=await r.json();
-    if(!r.ok) throw new Error(data.detail||'HTTP '+r.status);
+    if(!r.ok) throw new Error(data.detail||'Erro ao enviar');
     rmThink();
-    const total=(data.tokens&&data.tokens.total)||0;
-    const aMsg={role:'assistant',content:data.reply,provider:S.provider,model:S.model,time:Date.now(),usedKB:data.used_knowledge,tokens:total};
-    chat.messages.push(aMsg);appendMsg(aMsg);
-    if(S.user&&total>0){S.user.tokens_used=(S.user.tokens_used||0)+total;renderUserBar();}
+    const aMsg={role:'assistant',content:data.reply||'',time:Date.now(),provider:S.provider,usedKB:!!data.used_knowledge,tokens:data.tokens?.total||null};
+    chat.messages.push(aMsg);
+    chat.updatedAt=Date.now();
+    appendMsg(aMsg);
     save();
-    await saveConversationMessages(S.currentChat);
-    await saveConversationMeta(S.currentChat);
-  } catch(err){
-    rmThink();
-    const em={role:'assistant',content:'Erro: '+err.message,provider:S.provider,time:Date.now()};
-    chat.messages.push(em);appendMsg(em);save();
-    try{await saveConversationMessages(S.currentChat);}catch(e){console.error(e);}
+    await syncConversationMessages(chat);
+    await syncConversationMeta(chat);
+  } catch(e){
+    rmThink();toast('Erro: '+e.message,'err');
   }
-  document.getElementById('send-btn').disabled=false;renderChats();
+  document.getElementById('send-btn').disabled=false;
 }
 
-// --- KNOWLEDGE ---
-function onDrop(e){e.preventDefault();document.getElementById('uz').classList.remove('drag');const f=e.dataTransfer.files[0];if(f)uploadFile(f);}
-async function uploadFile(file){
-  if(!S.backendUrl){toast('Configure o backend','err');return;}
-  const pb=document.getElementById('pb'),pf=document.getElementById('pf'),us=document.getElementById('us');
-  pb.style.display='block';pf.style.width='20%';us.textContent='Enviando '+file.name+'...';
-  const fd=new FormData();fd.append('file',file);
-  try {
-    pf.style.width='50%';
-    const r=await fetch(S.backendUrl.replace(/\/$/,'')+'/api/knowledge/upload',{
-      method:'POST',body:fd,headers:{'Authorization':'Bearer '+S.token}
-    });
-    pf.style.width='90%';
-    const data=await r.json();
-    if(!r.ok)throw new Error(data.detail||'Erro no upload');
-    pf.style.width='100%';
-    us.textContent=data.name+' - '+data.chunks+' chunks indexados';
-    setTimeout(()=>{pb.style.display='none';pf.style.width='0';us.textContent='';},3000);
-    loadDocs();toast('"'+file.name+'" indexado!');
-  } catch(err){pb.style.display='none';us.textContent='';toast('Erro: '+err.message,'err');}
-}
-async function loadDocs(){
-  if(!S.backendUrl){document.getElementById('doc-list').innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Configure o backend.</div>';return;}
-  try {
-    const r=await authFetch('/api/knowledge/documents');
-    const docs=await r.json();
-    const list=document.getElementById('doc-list');
-    if(!docs.length){list.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhum documento ainda.</div>';return;}
-    const icons={pdf:'&#128213;',docx:'&#128216;',pptx:'&#128217;',txt:'&#128196;'};
-    list.innerHTML=docs.map(d=>{
-      const ext=d.name.split('.').pop().toLowerCase();
-      return `<div class="doc-item">
-        <div class="doc-icon">${icons[ext]||'&#128196;'}</div>
-        <div class="doc-info"><div class="doc-name">${esc(d.name)}</div><div class="doc-meta">${d.chunk_count} chunks</div></div>
-        <button class="bd" onclick="delDoc('${d.id}','${esc(d.name)}')">&#x1F5D1;</button></div>`;
-    }).join('');
-  } catch(e){document.getElementById('doc-list').innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+e.message+'</div>';}
-}
-async function delDoc(id,name){
-  if(!confirm('Remover "'+name+'"?'))return;
-  try{await authFetch('/api/knowledge/documents/'+id,{method:'DELETE'});loadDocs();toast('"'+name+'" removido.');}
-  catch(e){toast('Erro: '+e.message,'err');}
-}
-
-// --- PERSONAS ---
-async function loadPersonalities(){
-  if(!S.token||!S.backendUrl)return;
-  const r=await authFetch('/api/personalities');
-  const data=await r.json();
-  if(!r.ok) throw new Error(data.detail||'Erro ao carregar personalidades');
-  S.personas=Array.isArray(data.items)?data.items:[];
-  S.defaultPersonaId=data.default_id||null;
-  const currentExists=S.currentPersona && S.personas.some(p=>p.id===S.currentPersona);
-  if(!currentExists){
-    if(S.currentChat&&S.chats[S.currentChat]&&S.chats[S.currentChat].personaId&&S.personas.some(p=>p.id===S.chats[S.currentChat].personaId)){
-      S.currentPersona=S.chats[S.currentChat].personaId;
-    } else {
-      S.currentPersona=S.defaultPersonaId||null;
-    }
-  }
-  if(S.currentChat&&S.chats[S.currentChat]&&!S.chats[S.currentChat].personaId&&S.currentPersona){
-    S.chats[S.currentChat].personaId=S.currentPersona;
-  }
-  save();
-  renderPerOpts();
-  renderPerList();
-}
-async function openPersonas(){
-  try{
-    await loadPersonalities();
-    const isAdmin=S.user&&S.user.role==='admin';
-    document.getElementById('p-scope-wrap').style.display=isAdmin?'':'none';
-    document.getElementById('p-default-wrap').style.display=isAdmin?'':'none';
-    document.getElementById('m-per').style.display='flex';
-  }catch(e){toast('Erro ao carregar personalidades: '+e.message,'err');}
-}
-function renderPerList(){
-  const list=document.getElementById('per-list');
-  if(!S.personas.length){list.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhuma personalidade ainda.</div>';return;}
-  list.innerHTML=S.personas.map(p=>{
-    const prompt=p.system_prompt||'';
-    const meta=[p.scope==='global'?'Global':'Pessoal',p.is_default?'Padrao':'' ].filter(Boolean).join(' • ');
-    return `<div class="persona-item${S.currentPersona===p.id?' sel':''}">
-      <div style="flex:1"><div class="pn">${esc(p.name)}</div><div class="pd">${meta?esc(meta)+' — ':''}${esc(prompt.slice(0,90))}${prompt.length>90?'..':''}</div></div>
-      <button class="bs" style="padding:4px 10px;font-size:11px" onclick="usePer('${p.id}')">Usar</button>
-      ${p.can_delete?`<button class="bd" onclick="delPer('${p.id}')">X</button>`:''}
-    </div>`;
-  }).join('');
-}
-async function addPersona(){
-  const name=document.getElementById('p-name').value.trim();
-  const description=document.getElementById('p-desc').value.trim();
-  const prompt=document.getElementById('p-prompt').value.trim();
-  const isAdmin=S.user&&S.user.role==='admin';
-  const scope=isAdmin?(document.getElementById('p-scope').value||'personal'):'personal';
-  const isDefault=isAdmin&&scope==='global'?document.getElementById('p-default').checked:false;
-  if(!name||!prompt){toast('Preencha nome e instrucoes','err');return;}
-  try{
-    const r=await authFetch('/api/personalities',{
-      method:'POST',
-      body:JSON.stringify({name,description,system_prompt:prompt,scope,is_default:isDefault}),
-    });
-    const data=await r.json();
-    if(!r.ok) throw new Error(data.detail||'Erro ao criar personalidade');
-    document.getElementById('p-name').value='';
-    document.getElementById('p-desc').value='';
-    document.getElementById('p-prompt').value='';
-    if(document.getElementById('p-default')) document.getElementById('p-default').checked=false;
-    await loadPersonalities();
-    toast('Personalidade criada!');
-  }catch(e){toast('Erro: '+e.message,'err');}
-}
-function usePer(id){
-  S.currentPersona=id||null;
-  document.getElementById('per-sel').value=S.currentPersona||'';
-  if(S.currentChat&&S.chats[S.currentChat]) S.chats[S.currentChat].personaId=S.currentPersona;
-  syncCurrentChatMeta();
-  save();renderPerList();toast('Personalidade selecionada');
-}
-async function delPer(id){
-  try{
-    const r=await authFetch('/api/personalities/'+id,{method:'DELETE'});
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(data.detail||'Erro ao remover personalidade');
-    if(S.currentPersona===id){S.currentPersona=S.defaultPersonaId||null;document.getElementById('per-sel').value=S.currentPersona||'';}
-    if(S.currentChat&&S.chats[S.currentChat]&&S.chats[S.currentChat].personaId===id){S.chats[S.currentChat].personaId=S.currentPersona;}
-    await loadPersonalities();
-    toast('Personalidade removida!');
-  }catch(e){toast('Erro: '+e.message,'err');}
-}
-function renderPerOpts(){
-  const sel=document.getElementById('per-sel');
-  const opts=S.personas.map(p=>{
-    const label=p.is_default?`${p.name} (padrao)`:p.name;
-    return `<option value="${p.id}">${esc(label)}</option>`;
-  }).join('');
-  sel.innerHTML='<option value="">Sem personalidade</option>'+opts;
-  sel.value=S.currentPersona||'';
-}
-function setPersona(v){
+async function setPersona(v){
   S.currentPersona=v||null;
-  if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;
-  syncCurrentChatMeta();
-  save();
+  if(S.currentChat&&S.chats[S.currentChat]){
+    S.chats[S.currentChat].personaId=S.currentPersona;
+    save();
+    try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
+  } else save();
 }
 
 // --- ADMIN ---
 function openAdmin(){loadAdmin();document.getElementById('m-admin').style.display='flex';}
+async function loadGlobalRules(){
+  try{
+    const r=await authFetch('/api/admin/global-rules');
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.detail||'Erro ao carregar regras globais');
+    S.globalRules=data||{system_prompt:'',is_active:true};
+    document.getElementById('gr-prompt').value=S.globalRules.system_prompt||'';
+    document.getElementById('gr-active').checked=S.globalRules.is_active!==false;
+  }catch(e){toast('Erro: '+e.message,'err');}
+}
+async function saveGlobalRules(){
+  try{
+    const prompt=document.getElementById('gr-prompt').value.trim();
+    const is_active=document.getElementById('gr-active').checked;
+    const r=await authFetch('/api/admin/global-rules',{method:'PUT',body:JSON.stringify({system_prompt:prompt,is_active})});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.detail||'Erro ao salvar regras globais');
+    S.globalRules=data;
+    toast('Regras globais salvas!');
+  }catch(e){toast('Erro: '+e.message,'err');}
+}
 async function loadAdmin(){
   const cont=document.getElementById('admin-content');
   cont.innerHTML='<div style="font-size:13px;color:var(--tx3)">Carregando...</div>';
+  await loadGlobalRules();
   try {
     const r=await authFetch('/api/admin/users');
     const users=await r.json();
@@ -890,7 +812,6 @@ async function loadAdmin(){
       <thead><tr><th>Email</th><th>Role</th><th>Tokens usados</th><th>Limite</th><th>Ativo</th><th>Acoes</th></tr></thead>
       <tbody>${users.map(u=>{
         const pct=u.tokens_limit>0?Math.min(100,Math.round(u.tokens_used/u.tokens_limit*100)):0;
-        const rb=u.role==='admin'?'rb-admin':u.role==='claude_user'?'rb-claude':'rb-user';
         return `<tr>
           <td style="font-size:13px">${esc(u.email||u.id.slice(0,8))}</td>
           <td><select class="role-sel" onchange="updRole('${u.id}',this.value)">
@@ -912,7 +833,7 @@ async function updRole(uid,role){
   catch(e){toast('Erro: '+e.message,'err');}
 }
 async function updLimit(uid,lim){
-  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,tokens_limit:parseInt(lim)})});toast('Limite atualizado!');}
+  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,tokens_limit:Number(lim||0)})});toast('Limite atualizado!');}
   catch(e){toast('Erro: '+e.message,'err');}
 }
 async function updActive(uid,active){
@@ -920,15 +841,11 @@ async function updActive(uid,active){
   catch(e){toast('Erro: '+e.message,'err');}
 }
 async function resetTok(uid){
-  if(!confirm('Resetar tokens deste usuario?'))return;
-  try{await authFetch('/api/admin/users/reset-tokens',{method:'POST',body:JSON.stringify({user_id:uid})});loadAdmin();toast('Tokens resetados!');}
+  try{await authFetch('/api/admin/users/reset-tokens',{method:'POST',body:JSON.stringify({user_id:uid})});toast('Tokens resetados!');loadAdmin();}
   catch(e){toast('Erro: '+e.message,'err');}
 }
 
-// --- CONFIG ---
-function openCfg(){document.getElementById('cfg-url').value=S.backendUrl||'';document.getElementById('m-cfg').style.display='flex';}
-function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().replace(/\/$/,'');save();cm('m-cfg');toast('Configuracoes salvas!');}
-
+>
 // --- KB MODAL ---
 function openKnowledge(){loadDocs();document.getElementById('m-kb').style.display='flex';}
 
@@ -956,6 +873,8 @@ function md(text){
 // --- INIT ---
 function init(){
   load();
+  const passEl=document.getElementById('l-pass');
+  if(passEl) passEl.addEventListener('input', updatePasswordHints);
   // Auto-show settings if no URL
   if (!S.backendUrl) {
     document.getElementById('cfg-url').value='';
@@ -968,6 +887,8 @@ function init(){
     card.appendChild(hint);
   }
   renderModels();
+  setLoginTab(S.loginTab||'login');
+  updatePasswordHints();
   if (S.token && S.user) {
     afterLogin();
   }
