@@ -3,6 +3,7 @@ import io
 import uuid
 import logging
 from typing import Optional, List
+from datetime import datetime
 
 import httpx
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
@@ -74,6 +75,7 @@ async def startup():
 # ---------------------------------------------------------------
 
 async def get_current_user(authorization: str = Header(None)) -> dict:
+    """Validate Supabase JWT and return user profile."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing authorization header.")
     token = authorization.split(" ", 1)[1]
@@ -97,6 +99,7 @@ async def get_current_user(authorization: str = Header(None)) -> dict:
 
 
 def require_role(allowed_roles: List[str]):
+    """Dependency factory: checks user has one of the allowed roles."""
     async def checker(profile: dict = Depends(get_current_user)):
         if profile["role"] not in allowed_roles:
             raise HTTPException(403, "Your role does not have access to this feature.")
@@ -105,6 +108,7 @@ def require_role(allowed_roles: List[str]):
 
 
 async def check_token_limit(profile: dict, estimated_tokens: int = 500):
+    """Raise 429 if user is over their token limit."""
     used = profile.get("tokens_used", 0)
     limit = profile.get("tokens_limit", 100000)
     if limit > 0 and used + estimated_tokens > limit:
@@ -112,11 +116,13 @@ async def check_token_limit(profile: dict, estimated_tokens: int = 500):
 
 
 def update_token_usage(user_id: str, provider: str, model: str, input_tokens: int, output_tokens: int):
+    """Update token counters in background (best-effort)."""
     total = input_tokens + output_tokens
     try:
-        current = supa.table("user_profiles").select("tokens_used").eq("id", user_id).single().execute().data
-        current_used = (current or {}).get("tokens_used", 0)
-        supa.table("user_profiles").update({"tokens_used": current_used + total}).eq("id", user_id).execute()
+        supa.table("user_profiles").update({
+            "tokens_used": supa.table("user_profiles")
+                .select("tokens_used").eq("id", user_id).single().execute().data["tokens_used"] + total
+        }).eq("id", user_id).execute()
         supa.table("usage_log").insert({
             "user_id": user_id,
             "provider": provider,
@@ -127,45 +133,6 @@ def update_token_usage(user_id: str, provider: str, model: str, input_tokens: in
         }).execute()
     except Exception as exc:
         logger.error("update_token_usage error: %s", exc)
-
-
-def get_default_personality_id() -> Optional[str]:
-    if not supa:
-        return None
-    try:
-        resp = (
-            supa.table("ai_personalities")
-            .select("id")
-            .eq("scope", "global")
-            .eq("is_default", True)
-            .eq("is_active", True)
-            .limit(1)
-            .execute()
-        )
-        rows = resp.data or []
-        return rows[0]["id"] if rows else None
-    except Exception as exc:
-        logger.error("get_default_personality_id error: %s", exc)
-        return None
-
-
-def get_personality_for_user(personality_id: Optional[str], user_id: str) -> Optional[dict]:
-    if not supa or not personality_id:
-        return None
-    try:
-        resp = supa.table("ai_personalities").select("*").eq("id", personality_id).eq("is_active", True).limit(1).execute()
-        rows = resp.data or []
-        if not rows:
-            return None
-        item = rows[0]
-        if item.get("scope") == "global":
-            return item
-        if item.get("scope") == "personal" and item.get("created_by") == user_id:
-            return item
-        return None
-    except Exception as exc:
-        logger.error("get_personality_for_user error: %s", exc)
-        return None
 
 
 def ensure_conversation_owner(conversation_id: str, user_id: str) -> dict:
@@ -208,6 +175,7 @@ class UpdateProfileRequest(BaseModel):
     role: Optional[str] = None
     tokens_limit: Optional[int] = None
     active: Optional[bool] = None
+
 
 
 class PersonalityCreateRequest(BaseModel):
@@ -254,6 +222,111 @@ class ConversationMessageItem(BaseModel):
 
 class ConversationMessagesReplaceRequest(BaseModel):
     messages: List[ConversationMessageItem]
+
+
+def slugify(text: str) -> str:
+    value = ''.join(ch.lower() if ch.isalnum() else '-' for ch in text.strip())
+    while '--' in value:
+        value = value.replace('--', '-')
+    return value.strip('-') or 'personalidade'
+
+
+def normalize_personality_scope(scope: str) -> str:
+    scope = (scope or 'personal').strip().lower()
+    if scope not in ('global', 'personal'):
+        raise HTTPException(400, "Invalid scope. Use 'global' or 'personal'.")
+    return scope
+
+
+def personality_visible_to_user(personality: dict, profile: dict) -> bool:
+    if not personality or not personality.get('is_active', True):
+        return False
+    if personality.get('scope') == 'global':
+        return True
+    return personality.get('owner_user_id') == profile['id']
+
+
+def personality_can_manage(personality: dict, profile: dict) -> bool:
+    if profile['role'] == 'admin':
+        return True
+    return personality.get('scope') == 'personal' and personality.get('owner_user_id') == profile['id']
+
+
+def clear_existing_default_global():
+    if not supa:
+        return
+    supa.table('ai_personalities').update({'is_default': False}).eq('scope', 'global').eq('is_default', True).execute()
+
+
+def serialize_personality(personality: dict, profile: dict) -> dict:
+    return {
+        'id': personality['id'],
+        'name': personality['name'],
+        'slug': personality.get('slug'),
+        'description': personality.get('description'),
+        'scope': personality.get('scope', 'personal'),
+        'system_prompt': personality.get('system_prompt'),
+        'is_active': personality.get('is_active', True),
+        'is_default': personality.get('is_default', False),
+        'owner_user_id': personality.get('owner_user_id'),
+        'created_at': personality.get('created_at'),
+        'updated_at': personality.get('updated_at'),
+        'can_edit': personality_can_manage(personality, profile),
+        'can_delete': personality_can_manage(personality, profile),
+    }
+
+
+def get_default_global_personality() -> Optional[dict]:
+    if not supa:
+        return None
+    try:
+        resp = supa.table('ai_personalities').select('*').eq('scope', 'global').eq('is_active', True).eq('is_default', True).limit(1).execute()
+        data = resp.data or []
+        return data[0] if data else None
+    except Exception as exc:
+        logger.error('get_default_global_personality error: %s', exc)
+        return None
+
+
+def get_personality_by_id(personality_id: str) -> Optional[dict]:
+    if not supa:
+        return None
+    resp = supa.table('ai_personalities').select('*').eq('id', personality_id).limit(1).execute()
+    data = resp.data or []
+    return data[0] if data else None
+
+
+def get_visible_personalities(profile: dict) -> dict:
+    if not supa:
+        return {'items': [], 'default_id': None}
+    globals_resp = supa.table('ai_personalities').select('*').eq('scope', 'global').eq('is_active', True).order('name').execute()
+    personals_resp = supa.table('ai_personalities').select('*').eq('scope', 'personal').eq('owner_user_id', profile['id']).eq('is_active', True).order('name').execute()
+    items = (globals_resp.data or []) + (personals_resp.data or [])
+    default_item = next((p for p in items if p.get('scope') == 'global' and p.get('is_default')), None)
+    return {
+        'items': [serialize_personality(p, profile) for p in items],
+        'default_id': default_item['id'] if default_item else None,
+    }
+
+
+def resolve_system_prompt(req: ChatRequest, profile: dict) -> Optional[str]:
+    system_parts = []
+
+    if req.personality_id:
+        personality = get_personality_by_id(req.personality_id)
+        if not personality or not personality_visible_to_user(personality, profile):
+            raise HTTPException(403, 'Selected personality is not available for this user.')
+        if personality.get('system_prompt'):
+            system_parts.append(personality['system_prompt'])
+    elif req.system:
+        system_parts.append(req.system)
+    else:
+        default_personality = get_default_global_personality()
+        if default_personality and default_personality.get('system_prompt'):
+            system_parts.append(default_personality['system_prompt'])
+
+    return "\n\n".join(system_parts) if system_parts else None
+
 
 
 # ---------------------------------------------------------------
@@ -393,273 +466,31 @@ async def reset_tokens(req: UpdateProfileRequest, profile: dict = Depends(requir
     return {"reset": req.user_id}
 
 
-# --- Personalities ---
-
-@app.get("/api/personalities")
-async def list_personalities(profile: dict = Depends(get_current_user)):
-    global_resp = (
-        supa.table("ai_personalities")
-        .select("id,name,description,scope,is_default,created_by,is_active")
-        .eq("scope", "global")
-        .eq("is_active", True)
-        .order("name")
-        .execute()
-    )
-    personal_resp = (
-        supa.table("ai_personalities")
-        .select("id,name,description,scope,is_default,created_by,is_active")
-        .eq("scope", "personal")
-        .eq("created_by", profile["id"])
-        .eq("is_active", True)
-        .order("name")
-        .execute()
-    )
-    items = (global_resp.data or []) + (personal_resp.data or [])
-    return {"items": items, "default_id": get_default_personality_id()}
-
-
-@app.post("/api/personalities")
-async def create_personality(req: PersonalityCreateRequest, profile: dict = Depends(get_current_user)):
-    scope = (req.scope or "personal").strip().lower()
-    if scope not in ("global", "personal"):
-        raise HTTPException(400, "Invalid scope.")
-    if scope == "global" and profile["role"] != "admin":
-        raise HTTPException(403, "Only admins can create global personalities.")
-    if not req.name.strip() or not req.system_prompt.strip():
-        raise HTTPException(400, "Name and system_prompt are required.")
-
-    if scope == "global" and req.is_default:
-        supa.table("ai_personalities").update({"is_default": False}).eq("scope", "global").execute()
-
-    payload = {
-        "id": str(uuid.uuid4()),
-        "name": req.name.strip(),
-        "slug": req.name.strip().lower().replace(" ", "-") + "-" + str(uuid.uuid4())[:8],
-        "description": (req.description or "").strip() or None,
-        "system_prompt": req.system_prompt.strip(),
-        "scope": scope,
-        "created_by": None if scope == "global" else profile["id"],
-        "is_active": True,
-        "is_default": bool(req.is_default) if scope == "global" else False,
-    }
-    supa.table("ai_personalities").insert(payload).execute()
-    return payload
-
-
-@app.put("/api/personalities/{personality_id}")
-async def update_personality(personality_id: str, req: PersonalityUpdateRequest, profile: dict = Depends(get_current_user)):
-    current = get_personality_for_user(personality_id, profile["id"])
-    if not current and profile["role"] == "admin":
-        resp = supa.table("ai_personalities").select("*").eq("id", personality_id).limit(1).execute()
-        rows = resp.data or []
-        current = rows[0] if rows else None
-    if not current:
-        raise HTTPException(404, "Personality not found.")
-    if current.get("scope") == "global" and profile["role"] != "admin":
-        raise HTTPException(403, "Only admins can edit global personalities.")
-
-    update = {}
-    if req.name is not None:
-        update["name"] = req.name.strip()
-    if req.description is not None:
-        update["description"] = req.description.strip() or None
-    if req.system_prompt is not None:
-        update["system_prompt"] = req.system_prompt.strip()
-    if req.is_active is not None:
-        update["is_active"] = req.is_active
-    if req.is_default is not None and current.get("scope") == "global":
-        if profile["role"] != "admin":
-            raise HTTPException(403, "Only admins can set the default global personality.")
-        if req.is_default:
-            supa.table("ai_personalities").update({"is_default": False}).eq("scope", "global").execute()
-        update["is_default"] = req.is_default
-    if not update:
-        raise HTTPException(400, "Nothing to update.")
-    supa.table("ai_personalities").update(update).eq("id", personality_id).execute()
-    return {"updated": personality_id}
-
-
-@app.delete("/api/personalities/{personality_id}")
-async def delete_personality(personality_id: str, profile: dict = Depends(get_current_user)):
-    current = get_personality_for_user(personality_id, profile["id"])
-    if not current and profile["role"] == "admin":
-        resp = supa.table("ai_personalities").select("*").eq("id", personality_id).limit(1).execute()
-        rows = resp.data or []
-        current = rows[0] if rows else None
-    if not current:
-        raise HTTPException(404, "Personality not found.")
-    if current.get("scope") == "global" and profile["role"] != "admin":
-        raise HTTPException(403, "Only admins can delete global personalities.")
-    if current.get("scope") == "global" and current.get("is_default"):
-        raise HTTPException(400, "Cannot delete the default global personality before choosing another one.")
-    supa.table("ai_personalities").delete().eq("id", personality_id).execute()
-    return {"deleted": personality_id}
-
-
-# --- Conversations ---
-
-@app.get("/api/conversations")
-async def list_conversations(profile: dict = Depends(get_current_user)):
-    conv_resp = (
-        supa.table("ai_conversations")
-        .select("*")
-        .eq("user_id", profile["id"])
-        .order("updated_at", desc=True)
-        .execute()
-    )
-    conversations = conv_resp.data or []
-    if not conversations:
-        return []
-
-    msg_resp = (
-        supa.table("ai_messages")
-        .select("*")
-        .eq("user_id", profile["id"])
-        .order("message_order")
-        .execute()
-    )
-    all_messages = msg_resp.data or []
-    grouped = {}
-    for row in all_messages:
-        grouped.setdefault(row["conversation_id"], []).append({
-            "role": row["role"],
-            "content": row["content"],
-            "time": row.get("time_ms"),
-            "provider": row.get("provider"),
-            "model": row.get("model"),
-            "usedKB": row.get("used_knowledge", False),
-            "tokens": row.get("tokens_total", 0),
-        })
-
-    items = []
-    for conv in conversations:
-        items.append({
-            "id": conv["id"],
-            "title": conv.get("title") or "Novo chat",
-            "provider": conv.get("provider") or "openai",
-            "model": conv.get("model") or "gpt-4o",
-            "personality_id": conv.get("personality_id"),
-            "use_knowledge": conv.get("use_knowledge", False),
-            "created_at": conv.get("created_at"),
-            "updated_at": conv.get("updated_at"),
-            "messages": grouped.get(conv["id"], []),
-        })
-    return items
-
-
-@app.post("/api/conversations")
-async def create_conversation(req: ConversationCreateRequest, profile: dict = Depends(get_current_user)):
-    personality_id = req.personality_id
-    if personality_id:
-        p = get_personality_for_user(personality_id, profile["id"])
-        if not p:
-            raise HTTPException(400, "Invalid personality_id.")
-    payload = {
-        "id": str(uuid.uuid4()),
-        "user_id": profile["id"],
-        "title": (req.title or "Novo chat").strip() or "Novo chat",
-        "provider": req.provider,
-        "model": req.model,
-        "personality_id": personality_id,
-        "use_knowledge": req.use_knowledge,
-    }
-    supa.table("ai_conversations").insert(payload).execute()
-    payload["messages"] = []
-    return payload
-
-
-@app.put("/api/conversations/{conversation_id}")
-async def update_conversation(conversation_id: str, req: ConversationUpdateRequest, profile: dict = Depends(get_current_user)):
-    ensure_conversation_owner(conversation_id, profile["id"])
-    update = {}
-    if req.title is not None:
-        update["title"] = req.title.strip() or "Novo chat"
-    if req.provider is not None:
-        update["provider"] = req.provider
-    if req.model is not None:
-        update["model"] = req.model
-    if req.use_knowledge is not None:
-        update["use_knowledge"] = req.use_knowledge
-    if req.personality_id is not None:
-        if req.personality_id:
-            p = get_personality_for_user(req.personality_id, profile["id"])
-            if not p:
-                raise HTTPException(400, "Invalid personality_id.")
-            update["personality_id"] = req.personality_id
-        else:
-            update["personality_id"] = None
-    if not update:
-        raise HTTPException(400, "Nothing to update.")
-    supa.table("ai_conversations").update(update).eq("id", conversation_id).eq("user_id", profile["id"]).execute()
-    return {"updated": conversation_id}
-
-
-@app.put("/api/conversations/{conversation_id}/messages")
-async def replace_conversation_messages(conversation_id: str, req: ConversationMessagesReplaceRequest, profile: dict = Depends(get_current_user)):
-    ensure_conversation_owner(conversation_id, profile["id"])
-    supa.table("ai_messages").delete().eq("conversation_id", conversation_id).eq("user_id", profile["id"]).execute()
-
-    rows = []
-    for idx, msg in enumerate(req.messages):
-        rows.append({
-            "id": str(uuid.uuid4()),
-            "conversation_id": conversation_id,
-            "user_id": profile["id"],
-            "message_order": idx,
-            "role": msg.role,
-            "content": msg.content,
-            "time_ms": msg.time,
-            "provider": msg.provider,
-            "model": msg.model,
-            "used_knowledge": bool(msg.usedKB),
-            "tokens_total": int(msg.tokens or 0),
-        })
-    if rows:
-        supa.table("ai_messages").insert(rows).execute()
-    return {"saved": len(rows)}
-
-
-@app.delete("/api/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str, profile: dict = Depends(get_current_user)):
-    ensure_conversation_owner(conversation_id, profile["id"])
-    supa.table("ai_messages").delete().eq("conversation_id", conversation_id).eq("user_id", profile["id"]).execute()
-    supa.table("ai_conversations").delete().eq("id", conversation_id).eq("user_id", profile["id"]).execute()
-    return {"deleted": conversation_id}
-
-
 # --- Chat ---
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
+    # Claude requires claude_user or admin role
     if req.provider == "claude" and profile["role"] not in ("claude_user", "admin"):
         raise HTTPException(403, "Claude access requires the claude_user role. Contact your administrator.")
 
+    # Check token limit
     await check_token_limit(profile)
 
     messages = [m.dict() for m in req.messages]
     system_parts = []
 
-    if req.system:
-        system_parts.append(req.system)
-
-    personality = get_personality_for_user(req.personality_id, profile["id"]) if req.personality_id else None
-    if not personality:
-        default_id = get_default_personality_id()
-        if default_id:
-            personality = get_personality_for_user(default_id, profile["id"]) or get_personality_for_user(default_id, "")
-            if not personality:
-                try:
-                    resp = supa.table("ai_personalities").select("*").eq("id", default_id).limit(1).execute()
-                    rows = resp.data or []
-                    personality = rows[0] if rows else None
-                except Exception:
-                    personality = None
-    if personality and personality.get("system_prompt"):
-        system_parts.append(personality["system_prompt"])
+    resolved_system = resolve_system_prompt(req, profile)
+    if resolved_system:
+        system_parts.append(resolved_system)
 
     used_kb = False
+    chunks = []
     if req.use_knowledge and supa:
-        last_user = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
+        last_user = next(
+            (m["content"] for m in reversed(messages) if m["role"] == "user"),
+            "",
+        )
         chunks = await search_knowledge(last_user)
         if chunks:
             used_kb = True
@@ -710,9 +541,8 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     elif req.provider == "openai":
         if not OPENAI_KEY:
             raise HTTPException(400, "OPENAI_API_KEY not set on server.")
-        openai_messages = list(messages)
         if system_prompt:
-            openai_messages = [{"role": "system", "content": system_prompt}] + openai_messages
+            messages = [{"role": "system", "content": system_prompt}] + messages
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -720,7 +550,7 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
                     "Authorization": "Bearer " + OPENAI_KEY,
                     "Content-Type": "application/json",
                 },
-                json={"model": req.model, "messages": openai_messages, "max_tokens": 4096},
+                json={"model": req.model, "messages": messages, "max_tokens": 4096},
             )
             data = r.json()
             if not r.is_success:
@@ -730,9 +560,11 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
             usage = data.get("usage", {})
             input_tokens = usage.get("prompt_tokens", 0)
             output_tokens = usage.get("completion_tokens", 0)
+
     else:
         raise HTTPException(400, "Invalid provider.")
 
+    # Update token usage (best-effort)
     if supa and (input_tokens + output_tokens) > 0:
         update_token_usage(profile["id"], req.provider, req.model, input_tokens, output_tokens)
 
@@ -743,7 +575,253 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     }
 
 
-# --- Knowledge base ---
+
+# --- Conversations ---
+
+@app.get("/api/conversations")
+async def list_conversations(profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    conv_resp = (
+        supa.table("ai_conversations")
+        .select("*")
+        .eq("user_id", profile["id"])
+        .order("updated_at", desc=True)
+        .execute()
+    )
+    conversations = conv_resp.data or []
+
+    msg_resp = (
+        supa.table("ai_messages")
+        .select("*")
+        .eq("user_id", profile["id"])
+        .order("created_at")
+        .execute()
+    )
+    all_messages = msg_resp.data or []
+
+    grouped = {}
+    for msg in all_messages:
+        grouped.setdefault(msg["conversation_id"], []).append({
+            "role": msg.get("role"),
+            "content": msg.get("content"),
+            "time": msg.get("time_ms"),
+            "provider": msg.get("provider"),
+            "model": msg.get("model"),
+            "usedKB": msg.get("used_knowledge", False),
+            "tokens": msg.get("tokens_total", 0),
+        })
+
+    return [
+        {
+            "id": c["id"],
+            "title": c.get("title") or "Novo chat",
+            "provider": c.get("provider"),
+            "model": c.get("model"),
+            "personality_id": c.get("personality_id"),
+            "use_knowledge": c.get("use_knowledge", False),
+            "created_at": c.get("created_at"),
+            "updated_at": c.get("updated_at"),
+            "messages": grouped.get(c["id"], []),
+        }
+        for c in conversations
+    ]
+
+
+@app.post("/api/conversations")
+async def create_conversation(req: ConversationCreateRequest, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    now = datetime.utcnow().isoformat()
+    payload = {
+        "id": str(uuid.uuid4()),
+        "user_id": profile["id"],
+        "title": (req.title or "Novo chat").strip() or "Novo chat",
+        "provider": req.provider,
+        "model": req.model,
+        "personality_id": req.personality_id,
+        "use_knowledge": req.use_knowledge,
+        "created_at": now,
+        "updated_at": now,
+    }
+    supa.table("ai_conversations").insert(payload).execute()
+    return payload
+
+
+@app.put("/api/conversations/{conversation_id}")
+async def update_conversation(conversation_id: str, req: ConversationUpdateRequest, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    ensure_conversation_owner(conversation_id, profile["id"])
+
+    update = {"updated_at": datetime.utcnow().isoformat()}
+    if req.title is not None:
+        update["title"] = req.title.strip() or "Novo chat"
+    if req.provider is not None:
+        update["provider"] = req.provider
+    if req.model is not None:
+        update["model"] = req.model
+    if req.personality_id is not None:
+        update["personality_id"] = req.personality_id
+    if req.use_knowledge is not None:
+        update["use_knowledge"] = req.use_knowledge
+
+    supa.table("ai_conversations").update(update).eq("id", conversation_id).eq("user_id", profile["id"]).execute()
+    return {"updated": conversation_id}
+
+
+@app.put("/api/conversations/{conversation_id}/messages")
+async def replace_conversation_messages(conversation_id: str, req: ConversationMessagesReplaceRequest, profile: dict = Depends(get_current_user)):
+    ensure_conversation_owner(conversation_id, profile["id"])
+    supa.table("ai_messages").delete().eq("conversation_id", conversation_id).eq("user_id", profile["id"]).execute()
+
+    rows = []
+    for idx, m in enumerate(req.messages or []):
+        rows.append({
+            "id": str(uuid.uuid4()),
+            "conversation_id": conversation_id,
+            "user_id": profile["id"],
+            "message_index": idx,
+            "role": m.role,
+            "content": m.content,
+            "time_ms": m.time,
+            "provider": m.provider,
+            "model": m.model,
+            "used_knowledge": bool(m.usedKB),
+            "tokens_total": m.tokens or 0,
+            "created_at": datetime.utcnow().isoformat(),
+        })
+
+    if rows:
+        supa.table("ai_messages").insert(rows).execute()
+
+    supa.table("ai_conversations").update({"updated_at": datetime.utcnow().isoformat()}).eq("id", conversation_id).eq("user_id", profile["id"]).execute()
+    return {"updated": conversation_id, "messages": len(rows)}
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: str, profile: dict = Depends(get_current_user)):
+    ensure_conversation_owner(conversation_id, profile["id"])
+    supa.table("ai_messages").delete().eq("conversation_id", conversation_id).eq("user_id", profile["id"]).execute()
+    supa.table("ai_conversations").delete().eq("id", conversation_id).eq("user_id", profile["id"]).execute()
+    return {"deleted": conversation_id}
+
+
+# --- Personalities ---
+
+@app.get("/api/personalities")
+async def list_personalities(profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    return get_visible_personalities(profile)
+
+
+@app.post("/api/personalities")
+async def create_personality(req: PersonalityCreateRequest, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    scope = normalize_personality_scope(req.scope)
+    if scope == 'global' and profile['role'] != 'admin':
+        raise HTTPException(403, 'Only admins can create global personalities.')
+
+    name = (req.name or '').strip()
+    prompt = (req.system_prompt or '').strip()
+    if not name or not prompt:
+        raise HTTPException(400, 'Name and system prompt are required.')
+
+    slug = slugify(name)
+    payload = {
+        'name': name,
+        'slug': slug if scope == 'global' else f"{slug}-{profile['id'][:8]}",
+        'description': (req.description or '').strip() or None,
+        'system_prompt': prompt,
+        'scope': scope,
+        'owner_user_id': None if scope == 'global' else profile['id'],
+        'is_active': True,
+        'is_default': bool(req.is_default) if scope == 'global' else False,
+    }
+
+    if payload['is_default']:
+        clear_existing_default_global()
+
+    try:
+        resp = supa.table('ai_personalities').insert(payload).execute()
+        item = (resp.data or [None])[0]
+    except Exception as exc:
+        raise HTTPException(400, f'Could not create personality: {exc}')
+
+    return serialize_personality(item, profile)
+
+
+@app.put("/api/personalities/{personality_id}")
+async def update_personality(personality_id: str, req: PersonalityUpdateRequest, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    current = get_personality_by_id(personality_id)
+    if not current:
+        raise HTTPException(404, 'Personality not found.')
+    if not personality_can_manage(current, profile):
+        raise HTTPException(403, 'You do not have permission to edit this personality.')
+
+    update = {}
+    if req.name is not None:
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(400, 'Name cannot be empty.')
+        update['name'] = name
+        if current.get('scope') == 'global':
+            update['slug'] = slugify(name)
+    if req.description is not None:
+        update['description'] = req.description.strip() or None
+    if req.system_prompt is not None:
+        prompt = req.system_prompt.strip()
+        if not prompt:
+            raise HTTPException(400, 'System prompt cannot be empty.')
+        update['system_prompt'] = prompt
+    if req.is_active is not None:
+        update['is_active'] = req.is_active
+    if req.is_default is not None:
+        if current.get('scope') != 'global':
+            raise HTTPException(400, 'Only global personalities can be default.')
+        if profile['role'] != 'admin':
+            raise HTTPException(403, 'Only admins can change the default personality.')
+        update['is_default'] = req.is_default
+        if req.is_default:
+            clear_existing_default_global()
+
+    if not update:
+        raise HTTPException(400, 'Nothing to update.')
+
+    resp = supa.table('ai_personalities').update(update).eq('id', personality_id).execute()
+    item = (resp.data or [None])[0] or get_personality_by_id(personality_id)
+    return serialize_personality(item, profile)
+
+
+@app.delete("/api/personalities/{personality_id}")
+async def delete_personality(personality_id: str, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    current = get_personality_by_id(personality_id)
+    if not current:
+        raise HTTPException(404, 'Personality not found.')
+    if not personality_can_manage(current, profile):
+        raise HTTPException(403, 'You do not have permission to delete this personality.')
+
+    if current.get('scope') == 'global' and current.get('is_default'):
+        raise HTTPException(400, 'Cannot delete the default global personality. Set another default first.')
+
+    supa.table('ai_personalities').delete().eq('id', personality_id).execute()
+    return {'deleted': personality_id}
+
+
+
+# --- Knowledge base (admin only for upload/delete, all authenticated for list) ---
 
 @app.post("/api/knowledge/upload")
 async def upload_document(
@@ -802,6 +880,7 @@ async def list_documents(profile: dict = Depends(get_current_user)):
 async def delete_document(doc_id: str, profile: dict = Depends(get_current_user)):
     if not supa:
         raise HTTPException(503, "Supabase not configured.")
+    # Fetch doc to check ownership
     doc_resp = supa.table("cortex_documents").select("uploaded_by").eq("id", doc_id).single().execute()
     if not doc_resp.data:
         raise HTTPException(404, "Document not found.")
@@ -835,7 +914,7 @@ async def login(req: AuthRequest):
         resp = supa.auth.sign_in_with_password({"email": req.email, "password": req.password})
         session = resp.session
         user_id = resp.user.id
-    except Exception:
+    except Exception as exc:
         raise HTTPException(401, "Invalid email or password.")
 
     profile = supa.table("user_profiles").select("*").eq("id", user_id).single().execute().data
@@ -862,24 +941,35 @@ async def register(req: AuthRequest):
     if not supa:
         raise HTTPException(503, "Supabase not configured.")
     if not req.email.lower().endswith("@vale.com"):
-        raise HTTPException(400, "Only @vale.com emails are allowed.")
+        raise HTTPException(403, "Registration is restricted to @vale.com email addresses.")
     try:
         resp = supa.auth.sign_up({"email": req.email, "password": req.password})
-        user = resp.user
+        if not resp.user:
+            raise HTTPException(400, "Registration failed.")
         session = resp.session
+        user_id = resp.user.id
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(400, str(exc))
-    if not user:
-        raise HTTPException(400, "Could not create user.")
-    profile = supa.table("user_profiles").select("*").eq("id", user.id).single().execute().data
+        raise HTTPException(400, "Registration error: " + str(exc))
+
+    # Profile created by trigger; fetch it
+    import time
+    time.sleep(0.5)
+    profile = supa.table("user_profiles").select("*").eq("id", user_id).single().execute().data
+    role = profile["role"] if profile else "user"
+
+    if not session:
+        return {"message": "Account created. Check your email to confirm before logging in."}
+
     return {
-        "access_token": session.access_token if session else None,
+        "access_token": session.access_token,
         "user": {
-            "id": user.id,
+            "id": user_id,
             "email": req.email,
-            "role": profile["role"] if profile else "user",
-            "tokens_used": (profile or {}).get("tokens_used", 0),
-            "tokens_limit": (profile or {}).get("tokens_limit", 100000),
-            "active": (profile or {}).get("active", True),
+            "role": role,
+            "tokens_used": 0,
+            "tokens_limit": 100000,
+            "active": True,
         }
     }
