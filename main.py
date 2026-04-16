@@ -93,7 +93,8 @@ async def get_current_user(authorization: str = Header(None)) -> dict:
     profile_resp = supa.table("user_profiles").select("*").eq("id", user.id).single().execute()
     if not profile_resp.data:
         raise HTTPException(403, "User profile not found.")
-    profile = profile_resp.data
+    profile = dict(profile_resp.data)
+    profile["role"] = str(profile.get("role", "") or "").strip().lower()
     if not profile.get("active", True):
         raise HTTPException(403, "Account disabled.")
     return profile
@@ -101,9 +102,12 @@ async def get_current_user(authorization: str = Header(None)) -> dict:
 
 def require_role(allowed_roles: List[str]):
     """Dependency factory: checks user has one of the allowed roles."""
+    normalized_allowed = {str(r or "").strip().lower() for r in allowed_roles}
     async def checker(profile: dict = Depends(get_current_user)):
-        if profile["role"] not in allowed_roles:
-            raise HTTPException(403, "Your role does not have access to this feature.")
+        role = str(profile.get("role", "") or "").strip().lower()
+        if role not in normalized_allowed:
+            raise HTTPException(403, f"Your role ({role or 'unknown'}) does not have access to this feature.")
+        profile["role"] = role
         return profile
     return checker
 
