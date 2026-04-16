@@ -682,6 +682,13 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
             raise HTTPException(400, "OPENAI_API_KEY not set on server.")
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
+
+        payload = {"model": model, "messages": messages}
+        if model == "gpt-5.4-nano":
+            payload["max_completion_tokens"] = 4096
+        else:
+            payload["max_tokens"] = 4096
+
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -689,7 +696,7 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
                     "Authorization": "Bearer " + OPENAI_KEY,
                     "Content-Type": "application/json",
                 },
-                json={"model": model, "messages": messages, "max_tokens": 4096},
+                json=payload,
             )
             data = r.json()
             if not r.is_success:
