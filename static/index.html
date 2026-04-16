@@ -357,7 +357,7 @@ const MODELS = {
 let S = {
   backendUrl:'', provider:'openai', model:'gpt-4o',
   chats:{}, currentChat:null,
-  personas:[], currentPersona:null,
+  personas:[], currentPersona:null, defaultPersonaId:null,
   useKB:false, sidebarOpen:true,
   token:null, user:null,
   loginTab:'login',
@@ -404,7 +404,7 @@ async function doLogin() {
     S.token = data.access_token;
     S.user = data.user;
     save();
-    afterLogin();
+    await afterLogin();
   } catch(err) {
     errEl.textContent = err.message;
     errEl.style.display='block';
@@ -413,14 +413,12 @@ async function doLogin() {
   document.getElementById('login-btn').disabled = false;
 }
 
-function afterLogin() {
+async function afterLogin() {
   document.getElementById('login-screen').style.display='none';
   renderUserBar();
-  // Show admin btn if admin
   if (S.user && S.user.role === 'admin') {
     document.getElementById('admin-btn').style.display='';
   }
-  // Restrict Claude if not allowed
   if (S.user && !['admin','claude_user'].includes(S.user.role)) {
     document.getElementById('btn-claude').disabled = true;
     document.getElementById('btn-claude').title = 'Sem acesso ao Claude. Contate o administrador.';
@@ -429,8 +427,8 @@ function afterLogin() {
   renderModels();
   setProv(S.provider, false);
   document.getElementById('model-sel').value = S.model;
+  await loadPersonalities();
   renderChats();
-  renderPerOpts();
   updateKBBtn();
   if (S.currentChat && S.chats[S.currentChat]) loadChat(S.currentChat);
 }
@@ -498,6 +496,8 @@ function loadChat(id){
   document.getElementById('chat-title').textContent=c.title;
   setProv(c.provider||S.provider,false);S.model=c.model||S.model;
   document.getElementById('model-sel').value=S.model;
+  S.currentPersona = c.personaId || S.defaultPersonaId || null;
+  renderPerOpts();
   renderMsgs(c.messages);renderChats();save();
 }
 function delChat(id,e){
@@ -575,15 +575,14 @@ async function send(){
   input.value='';ar(input);
   document.getElementById('send-btn').disabled=true;
   appendMsg(uMsg);showThink();save();
-  let sys=null;
-  if(S.currentPersona){const p=S.personas.find(x=>x.id===S.currentPersona);if(p)sys=p.prompt;}
+  const personaId = S.currentPersona || S.defaultPersonaId || null;
   try {
     const r=await authFetch('/api/chat',{
       method:'POST',
       body:JSON.stringify({
         provider:S.provider,model:S.model,
         messages:chat.messages.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role,content:m.content})),
-        system:sys,use_knowledge:S.useKB,
+        personality_id:personaId,use_knowledge:S.useKB,
       }),
     });
     const data=await r.json();
@@ -648,30 +647,98 @@ async function delDoc(id,name){
 }
 
 // --- PERSONAS ---
-function openPersonas(){renderPerList();document.getElementById('m-per').style.display='flex';}
+async function loadPersonalities(){
+  if(!S.backendUrl || !S.token){return;}
+  try {
+    const r = await authFetch('/api/personalities');
+    const data = await r.json();
+    if(!r.ok) throw new Error(data.detail||'Erro ao carregar personalidades');
+    S.personas = data.items || [];
+    S.defaultPersonaId = data.default_id || null;
+    if(!S.currentPersona){S.currentPersona = S.defaultPersonaId || null;}
+    renderPerOpts();
+    renderPerList();
+    save();
+  } catch(e){
+    toast('Erro ao carregar personalidades: '+e.message,'err');
+  }
+}
+function openPersonas(){
+  if(!S.token){toast('Faca login primeiro','err');return;}
+  document.getElementById('p-scope').value = 'personal';
+  document.getElementById('p-default').checked = false;
+  document.getElementById('p-scope').disabled = !(S.user && S.user.role === 'admin');
+  document.getElementById('p-default').disabled = !(S.user && S.user.role === 'admin');
+  renderPerList();
+  document.getElementById('m-per').style.display='flex';
+}
 function renderPerList(){
   const list=document.getElementById('per-list');
   if(!S.personas.length){list.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhuma personalidade ainda.</div>';return;}
-  list.innerHTML=S.personas.map(p=>`<div class="persona-item${S.currentPersona===p.id?' sel':''}">
-    <div style="flex:1"><div class="pn">${esc(p.name)}</div><div class="pd">${esc(p.prompt.slice(0,80))}${p.prompt.length>80?'..':''}</div></div>
-    <button class="bs" style="padding:4px 10px;font-size:11px" onclick="usePer('${p.id}')">Usar</button>
-    <button class="bd" onclick="delPer('${p.id}')">X</button></div>`).join('');
+  list.innerHTML=S.personas.map(p=>{
+    const badges = [p.scope==='global'?'global':'pessoal', p.is_default?'padrao':'' ].filter(Boolean).map(b=>`<span style="font-size:10px;padding:2px 6px;border-radius:999px;border:1px solid var(--bdr);color:var(--tx3)">${b}</span>`).join(' ');
+    const actions = [`<button class="bs" style="padding:4px 10px;font-size:11px" onclick="usePer('${p.id}')">Usar</button>`];
+    if(p.can_delete){actions.push(`<button class="bd" onclick="delPer('${p.id}','${esc((p.name||'').replace(/'/g,"\'"))}')">X</button>`);}
+    return `<div class="persona-item${S.currentPersona===p.id?' sel':''}">
+      <div style="flex:1">
+        <div class="pn">${esc(p.name)} ${badges}</div>
+        <div class="pd">${esc((p.description||p.system_prompt||'').slice(0,100))}${(p.description||p.system_prompt||'').length>100?'..':''}</div>
+      </div>
+      ${actions.join('')}
+    </div>`;
+  }).join('');
 }
-function addPersona(){
-  const name=document.getElementById('p-name').value.trim(),prompt=document.getElementById('p-prompt').value.trim();
+async function addPersona(){
+  const name=document.getElementById('p-name').value.trim();
+  const description=document.getElementById('p-desc').value.trim();
+  const prompt=document.getElementById('p-prompt').value.trim();
+  const scope=(S.user && S.user.role==='admin') ? document.getElementById('p-scope').value : 'personal';
+  const is_default=(S.user && S.user.role==='admin') ? document.getElementById('p-default').checked : false;
   if(!name||!prompt){toast('Preencha nome e instrucoes','err');return;}
-  S.personas.push({id:'p'+Date.now(),name,prompt});
-  document.getElementById('p-name').value='';document.getElementById('p-prompt').value='';
-  save();renderPerList();renderPerOpts();toast('Personalidade criada!');
+  try {
+    const r=await authFetch('/api/personalities',{
+      method:'POST',
+      body:JSON.stringify({name,description,system_prompt:prompt,scope,is_default})
+    });
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.detail||'Erro ao criar personalidade');
+    document.getElementById('p-name').value='';
+    document.getElementById('p-desc').value='';
+    document.getElementById('p-prompt').value='';
+    await loadPersonalities();
+    usePer(data.id, false);
+    toast('Personalidade criada!');
+  } catch(e){toast('Erro: '+e.message,'err');}
 }
-function usePer(id){S.currentPersona=id;document.getElementById('per-sel').value=id;save();renderPerList();toast('Personalidade selecionada');}
-function delPer(id){S.personas=S.personas.filter(p=>p.id!==id);if(S.currentPersona===id){S.currentPersona=null;document.getElementById('per-sel').value='';}save();renderPerList();renderPerOpts();}
+function usePer(id, doSave=true){
+  S.currentPersona=id||S.defaultPersonaId||null;
+  document.getElementById('per-sel').value=S.currentPersona||'';
+  if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;
+  if(doSave)save();
+  renderPerList();
+  toast('Personalidade selecionada');
+}
+async function delPer(id,name){
+  if(!confirm('Remover "'+name+'"?'))return;
+  try {
+    const r=await authFetch('/api/personalities/'+id,{method:'DELETE'});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.detail||'Erro ao remover personalidade');
+    if(S.currentPersona===id){S.currentPersona=S.defaultPersonaId||null; if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;}
+    await loadPersonalities();
+    toast('Personalidade removida.');
+  } catch(e){toast('Erro: '+e.message,'err');}
+}
 function renderPerOpts(){
   const sel=document.getElementById('per-sel');
-  sel.innerHTML='<option value="">Sem personalidade</option>'+S.personas.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  sel.innerHTML='<option value="">Padrao do sistema</option>'+S.personas.map(p=>`<option value="${p.id}">${esc(p.name)}${p.is_default?' (padrao)':''}</option>`).join('');
   sel.value=S.currentPersona||'';
 }
-function setPersona(v){S.currentPersona=v||null;if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;save();}
+function setPersona(v){
+  S.currentPersona=v||S.defaultPersonaId||null;
+  if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;
+  save();
+}
 
 // --- ADMIN ---
 function openAdmin(){loadAdmin();document.getElementById('m-admin').style.display='flex';}
@@ -751,7 +818,7 @@ function md(text){
 }
 
 // --- INIT ---
-function init(){
+async function init(){
   load();
   // Auto-show settings if no URL
   if (!S.backendUrl) {
@@ -766,7 +833,7 @@ function init(){
   }
   renderModels();
   if (S.token && S.user) {
-    afterLogin();
+    await afterLogin();
   }
 }
 
