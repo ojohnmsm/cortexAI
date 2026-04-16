@@ -153,7 +153,6 @@ class ChatRequest(BaseModel):
     personality_id: Optional[str] = None
     use_knowledge: bool = False
     think: bool = False
-    conversation_id: Optional[str] = None
     attachment_ids: List[str] = []
 
 
@@ -426,29 +425,34 @@ def list_conversation_messages(conversation_id: str) -> List[dict]:
     if not supa:
         return []
 
-    attempts = [
+    items: List[dict] = []
+    query_attempts = [
         lambda: supa.table("ai_messages").select("*").eq("conversation_id", conversation_id).order("message_index").execute(),
         lambda: supa.table("ai_messages").select("*").eq("conversation_id", conversation_id).order("position").execute(),
         lambda: supa.table("ai_messages").select("*").eq("conversation_id", conversation_id).order("message_position").execute(),
         lambda: supa.table("ai_messages").select("*").eq("conversation_id", conversation_id).execute(),
     ]
-
-    items = []
-    for attempt in attempts:
+    for attempt in query_attempts:
         try:
             resp = attempt()
             items = resp.data or []
             break
         except Exception as exc:
-            logger.warning("list_conversation_messages fallback: %s", exc)
+            logger.warning("list_conversation_messages fallback failed: %s", exc)
 
-    def _sort_key(item: dict):
-        for key in ("message_index", "position", "message_position"):
-            if item.get(key) is not None:
-                return item.get(key)
-        return 0
+    def sort_key(item: dict):
+        return (
+            item.get("message_index")
+            if item.get("message_index") is not None else
+            item.get("position")
+            if item.get("position") is not None else
+            item.get("message_position")
+            if item.get("message_position") is not None else
+            0
+        )
 
-    items = sorted(items, key=_sort_key)
+    items = sorted(items, key=sort_key)
+
     return [
         {
             "role": item.get("role"),
@@ -478,15 +482,22 @@ def serialize_conversation(row: dict, include_messages: bool = False) -> dict:
     return data
 
 
-def replace_conversation_messages(conversation_id: str, user_id: str, messages: List[ConversationMessageItem], provider: Optional[str] = None, model: Optional[str] = None) -> int:
+def replace_conversation_messages(conversation: dict, messages: List[ConversationMessageItem], provider: Optional[str] = None, model: Optional[str] = None) -> int:
     if not supa:
         raise HTTPException(503, "Supabase not configured.")
+
+    conversation_id = conversation["id"]
+    user_id = conversation.get("user_id")
+
     supa.table("ai_messages").delete().eq("conversation_id", conversation_id).execute()
     if not messages:
         return 0
-    payload = []
+
+    minimal_payload = []
+    legacy_payload = []
+
     for i, msg in enumerate(messages):
-        payload.append({
+        minimal_payload.append({
             "id": str(uuid.uuid4()),
             "conversation_id": conversation_id,
             "user_id": user_id,
@@ -494,46 +505,62 @@ def replace_conversation_messages(conversation_id: str, user_id: str, messages: 
             "role": msg.role,
             "content": msg.content,
         })
-    supa.table("ai_messages").insert(payload).execute()
-    return len(payload)
-
-
-def write_message_audit(conversation_id: str, user_id: str, message_position: int, provider: str, model: str) -> Optional[str]:
-    if not supa:
-        return None
-    payload = {
-        "id": str(uuid.uuid4()),
-        "conversation_id": conversation_id,
-        "message_position": message_position,
-        "user_id": user_id,
-        "provider": provider,
-        "model": model,
-    }
-    try:
-        supa.table("ai_message_audit").insert(payload).execute()
-        return payload["id"]
-    except Exception as exc:
-        logger.warning("write_message_audit skipped: %s", exc)
-        return None
-
-
-def write_message_sources(audit_id: Optional[str], chunks: List[dict]):
-    if not supa or not audit_id or not chunks:
-        return
-    rows = []
-    for c in chunks:
-        rows.append({
+        legacy_payload.append({
             "id": str(uuid.uuid4()),
-            "audit_id": audit_id,
-            "document_id": c.get("doc_id") or c.get("document_id"),
-            "doc_name": c.get("doc_name"),
-            "chunk_id": c.get("id") or c.get("chunk_id"),
-            "similarity": c.get("similarity"),
+            "conversation_id": conversation_id,
+            "user_id": user_id,
+            "position": i,
+            "role": msg.role,
+            "content": msg.content,
+            "message_time": msg.time,
+            "provider": msg.provider or provider,
+            "model": model or conversation.get("model"),
+            "used_kb": bool(msg.usedKB),
+            "tokens_total": msg.tokens,
         })
+
+    insert_errors = []
+    for payload in (minimal_payload, legacy_payload):
+        try:
+            supa.table("ai_messages").insert(payload).execute()
+            return len(payload)
+        except Exception as exc:
+            insert_errors.append(str(exc))
+            logger.warning("replace_conversation_messages fallback insert failed: %s", exc)
+
+    raise HTTPException(500, "Could not persist conversation messages: " + " | ".join(insert_errors))
+
+
+def record_message_audit(conversation: dict, message_position: int, provider: str, model: str, chunks: List[dict]) -> None:
+    if not supa:
+        return
     try:
-        supa.table("ai_message_sources").insert(rows).execute()
+        audit_payload = {
+            "id": str(uuid.uuid4()),
+            "conversation_id": conversation["id"],
+            "message_position": message_position,
+            "user_id": conversation.get("user_id"),
+            "provider": provider,
+            "model": model,
+        }
+        audit_resp = supa.table("ai_message_audit").insert(audit_payload).execute()
+        audit_row = (audit_resp.data or [audit_payload])[0]
+        audit_id = audit_row.get("id", audit_payload["id"])
+
+        if chunks:
+            source_rows = []
+            for chunk in chunks:
+                source_rows.append({
+                    "id": str(uuid.uuid4()),
+                    "audit_id": audit_id,
+                    "document_id": chunk.get("document_id") or chunk.get("doc_id"),
+                    "doc_name": chunk.get("doc_name"),
+                    "chunk_id": chunk.get("chunk_id") or chunk.get("id"),
+                    "similarity": chunk.get("similarity"),
+                })
+            supa.table("ai_message_sources").insert(source_rows).execute()
     except Exception as exc:
-        logger.warning("write_message_sources skipped: %s", exc)
+        logger.warning("record_message_audit skipped: %s", exc)
 
 
 def touch_conversation(conversation_id: str, update: Optional[dict] = None):
@@ -816,10 +843,6 @@ async def delete_chat_attachment(attachment_id: str, profile: dict = Depends(get
 async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     provider, model = apply_chat_model_policy(req, profile)
 
-    conversation = None
-    if req.conversation_id:
-        conversation = get_user_conversation_or_404(req.conversation_id, profile)
-
     # Check token limit
     await check_token_limit(profile)
 
@@ -829,6 +852,10 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     resolved_system = resolve_system_prompt(req, profile)
     if resolved_system:
         system_parts.append(resolved_system)
+
+    conversation = None
+    if req.conversation_id:
+        conversation = get_user_conversation_or_404(req.conversation_id, profile)
 
     attachments = []
     if req.attachment_ids:
@@ -956,23 +983,34 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
         update_token_usage(profile["id"], provider, model, input_tokens, output_tokens)
 
     if conversation:
-        persisted_messages = [ConversationMessageItem(role=m.role, content=m.content) for m in req.messages]
-        persisted_messages.append(
-            ConversationMessageItem(
-                role="assistant",
-                content=reply,
-                provider=provider,
-                usedKB=used_kb,
-                tokens=input_tokens + output_tokens,
-            )
-        )
         try:
-            replace_conversation_messages(conversation["id"], profile["id"], persisted_messages, provider=provider, model=model)
+            persisted_messages = [
+                ConversationMessageItem(
+                    role=m.role,
+                    content=m.content,
+                    time=utc_now_iso(),
+                    provider=provider,
+                    usedKB=False,
+                    tokens=None,
+                )
+                for m in req.messages
+                if m.role in ("user", "assistant")
+            ]
+            persisted_messages.append(
+                ConversationMessageItem(
+                    role="assistant",
+                    content=reply,
+                    time=utc_now_iso(),
+                    provider=provider,
+                    usedKB=used_kb,
+                    tokens=input_tokens + output_tokens,
+                )
+            )
+            replace_conversation_messages(conversation, persisted_messages, provider=provider, model=model)
             touch_conversation(conversation["id"], {"provider": provider, "model": model})
-            audit_id = write_message_audit(conversation["id"], profile["id"], len(persisted_messages) - 1, provider, model)
-            write_message_sources(audit_id, chunks)
+            record_message_audit(conversation, len(persisted_messages) - 1, provider, model, chunks if used_kb else [])
         except Exception as exc:
-            logger.error("Conversation persistence failed: %s", exc)
+            logger.warning("chat persistence skipped: %s", exc)
 
     return {
         "reply": reply,
@@ -1158,7 +1196,7 @@ async def get_conversation_messages(conversation_id: str, profile: dict = Depend
 @app.put("/api/conversations/{conversation_id}/messages")
 async def sync_conversation_messages(conversation_id: str, req: ConversationMessagesSyncRequest, profile: dict = Depends(get_current_user)):
     current = get_user_conversation_or_404(conversation_id, profile)
-    count = replace_conversation_messages(conversation_id, profile["id"], req.messages, provider=current.get("provider"), model=current.get("model"))
+    count = replace_conversation_messages(current, req.messages, provider=current.get("provider"), model=current.get("model"))
     touch_conversation(conversation_id)
     return {"conversation_id": conversation_id, "count": count}
 
