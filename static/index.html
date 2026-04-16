@@ -1308,20 +1308,59 @@ async function loadDocs(){
   }catch(e){ box.innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+esc(e.message)+'</div>'; }
 }
 
-async function uploadDoc(){
-  const inp=document.getElementById('doc-file');
-  const file=inp&&inp.files?inp.files[0]:null;
-  if(!file){ toast('Selecione um arquivo','err'); return; }
-  const fd=new FormData(); fd.append('file',file);
+function kbUploadInput(){
+  return document.getElementById('fi') || document.getElementById('doc-file');
+}
+
+async function uploadFile(file){
+  return uploadDoc(file||null);
+}
+
+function onDrop(event){
+  event.preventDefault();
+  const zone=document.getElementById('uz');
+  if(zone) zone.classList.remove('drag');
+  const file=event.dataTransfer&&event.dataTransfer.files&&event.dataTransfer.files[0] ? event.dataTransfer.files[0] : null;
+  if(!file){
+    toast('Nenhum arquivo selecionado','err');
+    return;
+  }
+  uploadDoc(file);
+}
+
+async function uploadDoc(file=null){
+  const inp=kbUploadInput();
+  const picked=file || (inp&&inp.files?inp.files[0]:null);
+  if(!picked){ toast('Selecione um arquivo','err'); return; }
+  const zone=document.getElementById('uz');
+  const box=document.getElementById('doc-list');
+  const prevZone=zone?zone.innerHTML:null;
+  if(zone){
+    zone.classList.add('drag');
+    zone.innerHTML='<div style="text-align:center;color:var(--tx2)"><div style="font-weight:700;margin-bottom:6px">Enviando arquivo...</div><div style="font-size:12px">'+esc(picked.name)+'</div></div>';
+  }
+  if(box){
+    box.insertAdjacentHTML('afterbegin','<div id="kb-uploading" style="font-size:13px;color:var(--tx3);margin-bottom:8px">Enviando <b>'+esc(picked.name)+'</b>...</div>');
+  }
+  const fd=new FormData(); fd.append('file',picked);
   try{
     const url=getApiBase()+'/api/knowledge/upload';
     const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
     const data=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(data.detail||'Erro ao enviar documento');
-    inp.value='';
+    if(inp) inp.value='';
     toast('Documento enviado!');
     await loadDocs();
-  }catch(e){ toast('Erro: '+e.message,'err'); }
+  }catch(e){
+    toast('Erro: '+e.message,'err');
+  }finally{
+    const uploading=document.getElementById('kb-uploading');
+    if(uploading) uploading.remove();
+    if(zone){
+      zone.classList.remove('drag');
+      if(prevZone!=null) zone.innerHTML=prevZone;
+    }
+  }
 }
 
 async function delDoc(id){
