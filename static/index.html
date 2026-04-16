@@ -462,6 +462,7 @@ let S = {
 
 const save = () => localStorage.setItem('cortex-ai', JSON.stringify(S));
 const load = () => { try { const d=JSON.parse(localStorage.getItem('cortex-ai')); if(d) S={...S,...d}; } catch(e){} };
+const getApiBase = () => String(S.backendUrl || location.origin || '').trim().replace(/\/$/,'');
 
 // --- AUTH ---
 function passwordChecks(v){
@@ -514,12 +515,6 @@ async function doLogin() {
   const errEl = document.getElementById('login-err');
   errEl.style.display='none';
   if (!email || !pass) { errEl.textContent='Preencha email e senha.'; errEl.style.display='block'; return; }
-  if (!S.backendUrl) {
-     S.backendUrl = window.location.origin;
-  }
-    errEl.textContent='Configure a URL do backend primeiro em Configuracoes (icone de engrenagem).';
-    errEl.style.display='block'; return;
-  }
   const isReg = S.loginTab==='register';
   if (isReg) {
     const pass2 = document.getElementById('l-pass2').value;
@@ -530,7 +525,7 @@ async function doLogin() {
   document.getElementById('login-btn').disabled = true;
   try {
     const endpoint = isReg ? '/api/auth/register' : '/api/auth/login';
-    const r = await fetch(S.backendUrl.replace(/\/$/,'') + endpoint, {
+    const r = await fetch(getApiBase() + endpoint, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({email, password:pass}),
@@ -598,7 +593,7 @@ function renderUserBar() {
 // --- AUTH API calls ---
 async function authFetch(path, opts={}) {
   if (!S.token) throw new Error('Not authenticated');
-  const url = S.backendUrl.replace(/\/$/,'') + path;
+  const url = getApiBase() + path;
   const r = await fetch(url, {
     ...opts,
     headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+S.token, ...(opts.headers||{}) },
@@ -608,7 +603,7 @@ async function authFetch(path, opts={}) {
 }
 
 async function loadConversations(){
-  if(!S.token||!S.backendUrl)return;
+  if(!S.token)return;
   const r=await authFetch('/api/conversations');
   const data=await r.json();
   if(!r.ok) throw new Error(data.detail||'Erro ao carregar conversas');
@@ -652,7 +647,7 @@ async function createConversationRemote(chat){
 }
 
 async function syncConversationMeta(chat){
-  if(!S.token||!S.backendUrl||!chat||!chat.id) return;
+  if(!S.token||!chat||!chat.id) return;
   await authFetch('/api/conversations/'+chat.id,{
     method:'PUT',
     body:JSON.stringify({
@@ -666,7 +661,7 @@ async function syncConversationMeta(chat){
 }
 
 async function syncConversationMessages(chat){
-  if(!S.token||!S.backendUrl||!chat||!chat.id) return;
+  if(!S.token||!chat||!chat.id) return;
   await authFetch('/api/conversations/'+chat.id+'/messages',{
     method:'PUT',
     body:JSON.stringify({messages:(chat.messages||[]).map(m=>({
@@ -899,7 +894,7 @@ async function uploadChatAttachment(){
   try{
     const fd=new FormData();
     fd.append('file', file);
-    const url=S.backendUrl.replace(/\/$/,'')+'/api/chat/attachments/upload?conversation_id='+encodeURIComponent(S.currentChat);
+    const url=getApiBase()+'/api/chat/attachments/upload?conversation_id='+encodeURIComponent(S.currentChat);
     const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
     const data=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(data.detail||'Erro ao enviar anexo');
@@ -930,7 +925,6 @@ async function send(){
   const text=input.value.trim();
   const attachmentIds=currentChatAttachmentIds();
   if(!text && !attachmentIds.length)return;
-  if(!S.backendUrl){toast('Configure a URL do backend em ⚙','err');openCfg();return;}
   if(!S.token){toast('Faca login primeiro','err');return;}
   if(!S.currentChat||!S.chats[S.currentChat]){
     await newChat();
@@ -1059,7 +1053,7 @@ async function resetTok(uid){
 
 // --- PERSONAS ---
 async function loadPersonalities(){
-  if(!S.token||!S.backendUrl)return;
+  if(!S.token)return;
   const r=await authFetch('/api/personalities');
   const data=await r.json();
   if(!r.ok) throw new Error(data.detail||'Erro ao carregar personalidades');
@@ -1207,8 +1201,8 @@ async function resetTok(uid){
 }
 
 // --- CONFIG ---
-function openCfg(){document.getElementById('cfg-url').value=S.backendUrl||'';document.getElementById('m-cfg').style.display='flex';}
-function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().replace(/\/$/,'');save();cm('m-cfg');toast('Configuracoes salvas!');}
+function openCfg(){document.getElementById('cfg-url').value=S.backendUrl||getApiBase()||'';document.getElementById('m-cfg').style.display='flex';}
+function saveCfg(){const raw=document.getElementById('cfg-url').value.trim();S.backendUrl=(raw||location.origin).replace(/\/$/,'');save();cm('m-cfg');toast('Configuracoes salvas!');}
 
 
 
@@ -1239,7 +1233,7 @@ async function uploadDoc(){
   if(!file){ toast('Selecione um arquivo','err'); return; }
   const fd=new FormData(); fd.append('file',file);
   try{
-    const url=S.backendUrl.replace(/\/$/,'')+'/api/knowledge/upload';
+    const url=getApiBase()+'/api/knowledge/upload';
     const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
     const data=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(data.detail||'Erro ao enviar documento');
@@ -1285,16 +1279,9 @@ function init(){
   load();
   const passEl=document.getElementById('l-pass');
   if(passEl) passEl.addEventListener('input', updatePasswordHints);
-  // Auto-show settings if no URL
   if (!S.backendUrl) {
-    document.getElementById('cfg-url').value='';
-    // Show config hint on login screen
-    const card = document.querySelector('.login-card');
-    const hint = document.createElement('div');
-    hint.style.cssText='margin-top:14px;font-size:12px;color:#888;text-align:center;cursor:pointer;text-decoration:underline';
-    hint.textContent='Configurar URL do backend';
-    hint.onclick=()=>openCfg();
-    card.appendChild(hint);
+    S.backendUrl = (location.origin || '').replace(/\/$/,'');
+    save();
   }
   renderModels();
   setLoginTab(S.loginTab||'login');
