@@ -770,7 +770,7 @@ async function newChat(){
     save();renderChats();await loadChat(created.id);
   }catch(e){toast('Erro ao criar conversa: '+e.message,'err');}
 }
-async async function loadChat(id){
+async function loadChat(id){
   S.currentChat=id;const c=S.chats[id];if(!c)return;
   document.getElementById('chat-title').textContent=c.title;
   setProv(c.provider||S.provider,false);S.model=c.model||S.model;
@@ -995,7 +995,7 @@ async function loadGlobalRules(){
     document.getElementById('gr-active').checked=S.globalRules.is_active!==false;
   }catch(e){toast('Erro: '+e.message,'err');}
 }
-async async function saveGlobalRules(){
+async function saveGlobalRules(){
   try{
     const prompt=document.getElementById('gr-prompt').value.trim();
     const is_active=document.getElementById('gr-active').checked;
