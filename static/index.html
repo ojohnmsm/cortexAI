@@ -367,29 +367,8 @@ let S = {
   loginTab:'login',
 };
 
-const STORAGE_KEY = 'cortex-ai-ui';
-function save(){
-  const data = {
-    backendUrl:S.backendUrl,
-    provider:S.provider,
-    model:S.model,
-    currentChat:S.currentChat,
-    currentPersona:S.currentPersona,
-    defaultPersonaId:S.defaultPersonaId,
-    useKB:S.useKB,
-    sidebarOpen:S.sidebarOpen,
-    token:S.token,
-    user:S.user,
-    loginTab:S.loginTab,
-  };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
-function load(){
-  try {
-    const d=JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if(d) S={...S,...d,chats:{}};
-  } catch(e){}
-}
+const save = () => localStorage.setItem('cortex-ai', JSON.stringify(S));
+const load = () => { try { const d=JSON.parse(localStorage.getItem('cortex-ai')); if(d) S={...S,...d}; } catch(e){} };
 
 // --- AUTH ---
 function setLoginTab(t) {
@@ -429,7 +408,7 @@ async function doLogin() {
     S.token = data.access_token;
     S.user = data.user;
     save();
-    await afterLogin();
+    afterLogin();
   } catch(err) {
     errEl.textContent = err.message;
     errEl.style.display='block';
@@ -441,16 +420,15 @@ async function doLogin() {
 async function afterLogin() {
   document.getElementById('login-screen').style.display='none';
   renderUserBar();
+  // Show admin btn if admin
   if (S.user && S.user.role === 'admin') {
     document.getElementById('admin-btn').style.display='';
   }
+  // Restrict Claude if not allowed
   if (S.user && !['admin','claude_user'].includes(S.user.role)) {
     document.getElementById('btn-claude').disabled = true;
     document.getElementById('btn-claude').title = 'Sem acesso ao Claude. Contate o administrador.';
     if (S.provider === 'claude') { S.provider='openai'; }
-  } else {
-    document.getElementById('btn-claude').disabled = false;
-    document.getElementById('btn-claude').title = '';
   }
   renderModels();
   setProv(S.provider, false);
@@ -470,6 +448,7 @@ async function afterLogin() {
 function doLogout() {
   S.token = null; S.user = null; S.chats={}; S.currentChat=null;
   S.personas = []; S.currentPersona = null; S.defaultPersonaId = null;
+  S.useKB = false;
   save();
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('admin-btn').style.display='none';
@@ -705,17 +684,23 @@ async function send(){
   const text=input.value.trim();if(!text)return;
   if(!S.backendUrl){toast('Configure a URL do backend em ⚙','err');openCfg();return;}
   if(!S.token){toast('Faca login primeiro','err');return;}
-  if(!S.currentChat||!S.chats[S.currentChat]) await newChat();
+  if(!S.currentChat||!S.chats[S.currentChat]){
+    try{await newChat();}catch(err){toast('Erro ao criar chat: '+err.message,'err');return;}
+  }
   const chat=S.chats[S.currentChat];
-  chat.provider=S.provider;chat.model=S.model;chat.personaId=S.currentPersona||null;chat.useKB=S.useKB;
+  chat.provider=S.provider;chat.model=S.model;chat.useKB=S.useKB;chat.personaId=S.currentPersona||null;
   const uMsg={role:'user',content:text,time:Date.now()};
   chat.messages.push(uMsg);
-  if(chat.messages.length===1){chat.title=text.slice(0,38)+(text.length>38?'..':'');document.getElementById('chat-title').textContent=chat.title;renderChats();}
+  if(chat.messages.length===1){
+    chat.title=text.slice(0,38)+(text.length>38?'..':'');
+    document.getElementById('chat-title').textContent=chat.title;
+    renderChats();
+    try{await saveConversationMeta(S.currentChat);}catch(err){console.error(err);}
+  }
   input.value='';ar(input);
   document.getElementById('send-btn').disabled=true;
   appendMsg(uMsg);showThink();save();
   try {
-    await saveConversationMeta(S.currentChat);
     await saveConversationMessages(S.currentChat);
     const r=await authFetch('/api/chat',{
       method:'POST',
@@ -733,14 +718,14 @@ async function send(){
     const aMsg={role:'assistant',content:data.reply,provider:S.provider,model:S.model,time:Date.now(),usedKB:data.used_knowledge,tokens:total};
     chat.messages.push(aMsg);appendMsg(aMsg);
     if(S.user&&total>0){S.user.tokens_used=(S.user.tokens_used||0)+total;renderUserBar();}
-    await saveConversationMessages(S.currentChat);
     save();
+    await saveConversationMessages(S.currentChat);
+    await saveConversationMeta(S.currentChat);
   } catch(err){
     rmThink();
     const em={role:'assistant',content:'Erro: '+err.message,provider:S.provider,time:Date.now()};
-    chat.messages.push(em);appendMsg(em);
+    chat.messages.push(em);appendMsg(em);save();
     try{await saveConversationMessages(S.currentChat);}catch(e){console.error(e);}
-    save();
   }
   document.getElementById('send-btn').disabled=false;renderChats();
 }
@@ -860,7 +845,8 @@ async function addPersona(){
 function usePer(id){
   S.currentPersona=id||null;
   document.getElementById('per-sel').value=S.currentPersona||'';
-  if(S.currentChat&&S.chats[S.currentChat]) {S.chats[S.currentChat].personaId=S.currentPersona; syncCurrentChatMeta();}
+  if(S.currentChat&&S.chats[S.currentChat]) S.chats[S.currentChat].personaId=S.currentPersona;
+  syncCurrentChatMeta();
   save();renderPerList();toast('Personalidade selecionada');
 }
 async function delPer(id){
@@ -885,7 +871,8 @@ function renderPerOpts(){
 }
 function setPersona(v){
   S.currentPersona=v||null;
-  if(S.currentChat&&S.chats[S.currentChat]){S.chats[S.currentChat].personaId=S.currentPersona; syncCurrentChatMeta();}
+  if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;
+  syncCurrentChatMeta();
   save();
 }
 
@@ -946,7 +933,7 @@ function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().
 function openKnowledge(){loadDocs();document.getElementById('m-kb').style.display='flex';}
 
 // --- HELPERS ---
-function toggleSB(){S.sidebarOpen=!S.sidebarOpen;document.getElementById('sidebar').classList.toggle('collapsed',!S.sidebarOpen);save();}
+function toggleSB(){S.sidebarOpen=!S.sidebarOpen;document.getElementById('sidebar').classList.toggle('collapsed',!S.sidebarOpen);}
 function cm(id){document.getElementById(id).style.display='none';}
 function co(e,id){if(e.target===e.currentTarget)cm(id);}
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
@@ -982,7 +969,7 @@ function init(){
   }
   renderModels();
   if (S.token && S.user) {
-    afterLogin().catch(console.error);
+    afterLogin();
   }
 }
 
