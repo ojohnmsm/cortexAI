@@ -3,6 +3,7 @@ import io
 import uuid
 import logging
 from typing import Optional, List
+from datetime import datetime
 
 import httpx
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header
@@ -148,6 +149,7 @@ class ChatRequest(BaseModel):
     model: str
     messages: List[Message]
     system: Optional[str] = None
+    personality_id: Optional[str] = None
     use_knowledge: bool = False
 
 
@@ -156,6 +158,128 @@ class UpdateProfileRequest(BaseModel):
     role: Optional[str] = None
     tokens_limit: Optional[int] = None
     active: Optional[bool] = None
+
+
+
+class PersonalityCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    system_prompt: str
+    scope: str = "personal"
+    is_default: bool = False
+
+
+class PersonalityUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_default: Optional[bool] = None
+
+
+def slugify(text: str) -> str:
+    value = ''.join(ch.lower() if ch.isalnum() else '-' for ch in text.strip())
+    while '--' in value:
+        value = value.replace('--', '-')
+    return value.strip('-') or 'personalidade'
+
+
+def normalize_personality_scope(scope: str) -> str:
+    scope = (scope or 'personal').strip().lower()
+    if scope not in ('global', 'personal'):
+        raise HTTPException(400, "Invalid scope. Use 'global' or 'personal'.")
+    return scope
+
+
+def personality_visible_to_user(personality: dict, profile: dict) -> bool:
+    if not personality or not personality.get('is_active', True):
+        return False
+    if personality.get('scope') == 'global':
+        return True
+    return personality.get('owner_user_id') == profile['id']
+
+
+def personality_can_manage(personality: dict, profile: dict) -> bool:
+    if profile['role'] == 'admin':
+        return True
+    return personality.get('scope') == 'personal' and personality.get('owner_user_id') == profile['id']
+
+
+def clear_existing_default_global():
+    if not supa:
+        return
+    supa.table('ai_personalities').update({'is_default': False}).eq('scope', 'global').eq('is_default', True).execute()
+
+
+def serialize_personality(personality: dict, profile: dict) -> dict:
+    return {
+        'id': personality['id'],
+        'name': personality['name'],
+        'slug': personality.get('slug'),
+        'description': personality.get('description'),
+        'scope': personality.get('scope', 'personal'),
+        'system_prompt': personality.get('system_prompt'),
+        'is_active': personality.get('is_active', True),
+        'is_default': personality.get('is_default', False),
+        'owner_user_id': personality.get('owner_user_id'),
+        'created_at': personality.get('created_at'),
+        'updated_at': personality.get('updated_at'),
+        'can_edit': personality_can_manage(personality, profile),
+        'can_delete': personality_can_manage(personality, profile),
+    }
+
+
+def get_default_global_personality() -> Optional[dict]:
+    if not supa:
+        return None
+    try:
+        resp = supa.table('ai_personalities').select('*').eq('scope', 'global').eq('is_active', True).eq('is_default', True).limit(1).execute()
+        data = resp.data or []
+        return data[0] if data else None
+    except Exception as exc:
+        logger.error('get_default_global_personality error: %s', exc)
+        return None
+
+
+def get_personality_by_id(personality_id: str) -> Optional[dict]:
+    if not supa:
+        return None
+    resp = supa.table('ai_personalities').select('*').eq('id', personality_id).limit(1).execute()
+    data = resp.data or []
+    return data[0] if data else None
+
+
+def get_visible_personalities(profile: dict) -> dict:
+    if not supa:
+        return {'items': [], 'default_id': None}
+    globals_resp = supa.table('ai_personalities').select('*').eq('scope', 'global').eq('is_active', True).order('name').execute()
+    personals_resp = supa.table('ai_personalities').select('*').eq('scope', 'personal').eq('owner_user_id', profile['id']).eq('is_active', True).order('name').execute()
+    items = (globals_resp.data or []) + (personals_resp.data or [])
+    default_item = next((p for p in items if p.get('scope') == 'global' and p.get('is_default')), None)
+    return {
+        'items': [serialize_personality(p, profile) for p in items],
+        'default_id': default_item['id'] if default_item else None,
+    }
+
+
+def resolve_system_prompt(req: ChatRequest, profile: dict) -> Optional[str]:
+    system_parts = []
+
+    if req.personality_id:
+        personality = get_personality_by_id(req.personality_id)
+        if not personality or not personality_visible_to_user(personality, profile):
+            raise HTTPException(403, 'Selected personality is not available for this user.')
+        if personality.get('system_prompt'):
+            system_parts.append(personality['system_prompt'])
+    elif req.system:
+        system_parts.append(req.system)
+    else:
+        default_personality = get_default_global_personality()
+        if default_personality and default_personality.get('system_prompt'):
+            system_parts.append(default_personality['system_prompt'])
+
+    return "\n\n".join(system_parts) if system_parts else None
+
 
 
 # ---------------------------------------------------------------
@@ -309,8 +433,9 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     messages = [m.dict() for m in req.messages]
     system_parts = []
 
-    if req.system:
-        system_parts.append(req.system)
+    resolved_system = resolve_system_prompt(req, profile)
+    if resolved_system:
+        system_parts.append(resolved_system)
 
     used_kb = False
     chunks = []
@@ -401,6 +526,118 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
         "used_knowledge": used_kb,
         "tokens": {"input": input_tokens, "output": output_tokens, "total": input_tokens + output_tokens},
     }
+
+
+
+# --- Personalities ---
+
+@app.get("/api/personalities")
+async def list_personalities(profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+    return get_visible_personalities(profile)
+
+
+@app.post("/api/personalities")
+async def create_personality(req: PersonalityCreateRequest, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    scope = normalize_personality_scope(req.scope)
+    if scope == 'global' and profile['role'] != 'admin':
+        raise HTTPException(403, 'Only admins can create global personalities.')
+
+    name = (req.name or '').strip()
+    prompt = (req.system_prompt or '').strip()
+    if not name or not prompt:
+        raise HTTPException(400, 'Name and system prompt are required.')
+
+    slug = slugify(name)
+    payload = {
+        'name': name,
+        'slug': slug if scope == 'global' else f"{slug}-{profile['id'][:8]}",
+        'description': (req.description or '').strip() or None,
+        'system_prompt': prompt,
+        'scope': scope,
+        'owner_user_id': None if scope == 'global' else profile['id'],
+        'is_active': True,
+        'is_default': bool(req.is_default) if scope == 'global' else False,
+    }
+
+    if payload['is_default']:
+        clear_existing_default_global()
+
+    try:
+        resp = supa.table('ai_personalities').insert(payload).execute()
+        item = (resp.data or [None])[0]
+    except Exception as exc:
+        raise HTTPException(400, f'Could not create personality: {exc}')
+
+    return serialize_personality(item, profile)
+
+
+@app.put("/api/personalities/{personality_id}")
+async def update_personality(personality_id: str, req: PersonalityUpdateRequest, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    current = get_personality_by_id(personality_id)
+    if not current:
+        raise HTTPException(404, 'Personality not found.')
+    if not personality_can_manage(current, profile):
+        raise HTTPException(403, 'You do not have permission to edit this personality.')
+
+    update = {}
+    if req.name is not None:
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(400, 'Name cannot be empty.')
+        update['name'] = name
+        if current.get('scope') == 'global':
+            update['slug'] = slugify(name)
+    if req.description is not None:
+        update['description'] = req.description.strip() or None
+    if req.system_prompt is not None:
+        prompt = req.system_prompt.strip()
+        if not prompt:
+            raise HTTPException(400, 'System prompt cannot be empty.')
+        update['system_prompt'] = prompt
+    if req.is_active is not None:
+        update['is_active'] = req.is_active
+    if req.is_default is not None:
+        if current.get('scope') != 'global':
+            raise HTTPException(400, 'Only global personalities can be default.')
+        if profile['role'] != 'admin':
+            raise HTTPException(403, 'Only admins can change the default personality.')
+        update['is_default'] = req.is_default
+        if req.is_default:
+            clear_existing_default_global()
+
+    if not update:
+        raise HTTPException(400, 'Nothing to update.')
+
+    resp = supa.table('ai_personalities').update(update).eq('id', personality_id).execute()
+    item = (resp.data or [None])[0] or get_personality_by_id(personality_id)
+    return serialize_personality(item, profile)
+
+
+@app.delete("/api/personalities/{personality_id}")
+async def delete_personality(personality_id: str, profile: dict = Depends(get_current_user)):
+    if not supa:
+        raise HTTPException(503, "Supabase not configured.")
+
+    current = get_personality_by_id(personality_id)
+    if not current:
+        raise HTTPException(404, 'Personality not found.')
+    if not personality_can_manage(current, profile):
+        raise HTTPException(403, 'You do not have permission to delete this personality.')
+
+    if current.get('scope') == 'global' and current.get('is_default'):
+        raise HTTPException(400, 'Cannot delete the default global personality. Set another default first.')
+
+    supa.table('ai_personalities').delete().eq('id', personality_id).execute()
+    return {'deleted': personality_id}
+
 
 
 # --- Knowledge base (admin only for upload/delete, all authenticated for list) ---
