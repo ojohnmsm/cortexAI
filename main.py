@@ -444,7 +444,7 @@ def serialize_conversation(row: dict, include_messages: bool = False) -> dict:
         "id": row.get("id"),
         "title": row.get("title") or "Novo chat",
         "provider": row.get("provider") or "openai",
-        "model": row.get("model") or "gpt-4o",
+        "model": row.get("model") or "gpt-5.4-nano",
         "personality_id": row.get("personality_id"),
         "use_knowledge": row.get("use_knowledge", False),
         "created_at": row.get("created_at"),
