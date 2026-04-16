@@ -1,7 +1,6 @@
 import os
 import io
 import uuid
-import json
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -116,6 +115,40 @@ async def check_token_limit(profile: dict, estimated_tokens: int = 500):
         raise HTTPException(429, "Token limit reached. Contact your administrator.")
 
 
+def get_allowed_openai_models_for_admin() -> List[str]:
+    return [
+        "gpt-5.4-thinking",
+        "gpt-5.4-nano",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-4",
+        "gpt-3.5-turbo",
+        "o1",
+        "o1-mini",
+    ]
+
+
+def apply_chat_model_policy(req: ChatRequest, profile: dict) -> tuple[str, str]:
+    provider = req.provider
+    model = req.model
+
+    if provider == "claude":
+        if profile["role"] not in ("claude_user", "admin"):
+            raise HTTPException(403, "Claude access requires the claude_user role. Contact your administrator.")
+        return provider, model
+
+    if provider != "openai":
+        raise HTTPException(400, "Unsupported provider.")
+
+    if profile["role"] == "admin":
+        if model not in get_allowed_openai_models_for_admin():
+            raise HTTPException(400, "OpenAI model not allowed for admin selection.")
+        return "openai", model
+
+    return "openai", ("gpt-4o" if req.think else "gpt-5.4-nano")
+
+
 def update_token_usage(user_id: str, provider: str, model: str, input_tokens: int, output_tokens: int):
     """Update token counters in background (best-effort)."""
     total = input_tokens + output_tokens
@@ -152,7 +185,7 @@ class ChatRequest(BaseModel):
     system: Optional[str] = None
     personality_id: Optional[str] = None
     use_knowledge: bool = False
-    conversation_id: Optional[str] = None
+    think: bool = False
 
 
 class UpdateProfileRequest(BaseModel):
@@ -182,7 +215,7 @@ class PersonalityUpdateRequest(BaseModel):
 class ConversationCreateRequest(BaseModel):
     title: Optional[str] = None
     provider: str = "openai"
-    model: str = "gpt-4o"
+    model: str = "gpt-5.4-nano"
     personality_id: Optional[str] = None
     use_knowledge: bool = False
 
@@ -202,7 +235,6 @@ class ConversationMessageItem(BaseModel):
     provider: Optional[str] = None
     usedKB: Optional[bool] = None
     tokens: Optional[int] = None
-    sources: Optional[List[Dict[str, Any]]] = None
 
 
 class ConversationMessagesSyncRequest(BaseModel):
@@ -384,7 +416,6 @@ def list_conversation_messages(conversation_id: str) -> List[dict]:
             "provider": item.get("provider"),
             "usedKB": item.get("used_kb", False),
             "tokens": item.get("tokens_total"),
-            "sources": json.loads(item.get("sources_json") or "[]"),
         }
         for item in items
     ]
@@ -424,7 +455,6 @@ def replace_conversation_messages(conversation_id: str, messages: List[Conversat
             "provider": msg.provider or provider,
             "used_kb": bool(msg.usedKB),
             "tokens_total": msg.tokens,
-            "sources_json": json.dumps(msg.sources or [], ensure_ascii=False),
         })
     supa.table("ai_messages").insert(payload).execute()
     return len(payload)
@@ -436,61 +466,6 @@ def touch_conversation(conversation_id: str, update: Optional[dict] = None):
     update = dict(update or {})
     update["updated_at"] = utc_now_iso()
     supa.table("ai_conversations").update(update).eq("id", conversation_id).execute()
-
-
-def normalize_source_item(source: Dict[str, Any], rank: int) -> Dict[str, Any]:
-    return {
-        "document_id": source.get("document_id") or source.get("doc_id"),
-        "doc_name": source.get("doc_name") or source.get("document_name") or "Documento",
-        "chunk_id": source.get("chunk_id") or source.get("id"),
-        "similarity": source.get("similarity") if source.get("similarity") is not None else source.get("score"),
-        "rank": rank,
-    }
-
-
-def build_sources_from_chunks(chunks: List[dict]) -> List[dict]:
-    return [normalize_source_item(chunk, i + 1) for i, chunk in enumerate(chunks or [])]
-
-
-def record_chat_audit(conversation_id: Optional[str], profile: dict, req: ChatRequest, used_kb: bool, input_tokens: int, output_tokens: int, sources: List[dict]) -> Optional[str]:
-    if not supa:
-        return None
-    try:
-        audit_id = str(uuid.uuid4())
-        payload = {
-            "id": audit_id,
-            "conversation_id": conversation_id,
-            "user_id": profile["id"],
-            "provider": req.provider,
-            "model": req.model,
-            "personality_id": req.personality_id,
-            "use_knowledge": bool(req.use_knowledge),
-            "used_kb": bool(used_kb),
-            "tokens_input": input_tokens,
-            "tokens_output": output_tokens,
-            "tokens_total": input_tokens + output_tokens,
-            "created_at": utc_now_iso(),
-        }
-        supa.table("ai_message_audit").insert(payload).execute()
-        if sources:
-            rows = []
-            for src in sources:
-                rows.append({
-                    "id": str(uuid.uuid4()),
-                    "audit_id": audit_id,
-                    "conversation_id": conversation_id,
-                    "document_id": src.get("document_id"),
-                    "doc_name": src.get("doc_name"),
-                    "chunk_id": src.get("chunk_id"),
-                    "similarity": src.get("similarity"),
-                    "rank_position": src.get("rank"),
-                    "created_at": utc_now_iso(),
-                })
-            supa.table("ai_message_sources").insert(rows).execute()
-        return audit_id
-    except Exception as exc:
-        logger.error("record_chat_audit error: %s", exc)
-        return None
 
 
 # ---------------------------------------------------------------
@@ -634,9 +609,7 @@ async def reset_tokens(req: UpdateProfileRequest, profile: dict = Depends(requir
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
-    # Claude requires claude_user or admin role
-    if req.provider == "claude" and profile["role"] not in ("claude_user", "admin"):
-        raise HTTPException(403, "Claude access requires the claude_user role. Contact your administrator.")
+    provider, model = apply_chat_model_policy(req, profile)
 
     # Check token limit
     await check_token_limit(profile)
@@ -673,11 +646,11 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
     input_tokens = 0
     output_tokens = 0
 
-    if req.provider == "claude":
+    if provider == "claude":
         if not ANTHROPIC_KEY:
             raise HTTPException(400, "ANTHROPIC_API_KEY not set on server.")
         body = {
-            "model": req.model,
+            "model": model,
             "max_tokens": 4096,
             "messages": messages,
         }
@@ -702,7 +675,7 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
             input_tokens = usage.get("input_tokens", 0)
             output_tokens = usage.get("output_tokens", 0)
 
-    elif req.provider == "openai":
+    elif provider == "openai":
         if not OPENAI_KEY:
             raise HTTPException(400, "OPENAI_API_KEY not set on server.")
         if system_prompt:
@@ -714,7 +687,7 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
                     "Authorization": "Bearer " + OPENAI_KEY,
                     "Content-Type": "application/json",
                 },
-                json={"model": req.model, "messages": messages, "max_tokens": 4096},
+                json={"model": model, "messages": messages, "max_tokens": 4096},
             )
             data = r.json()
             if not r.is_success:
@@ -730,7 +703,7 @@ async def chat(req: ChatRequest, profile: dict = Depends(get_current_user)):
 
     # Update token usage (best-effort)
     if supa and (input_tokens + output_tokens) > 0:
-        update_token_usage(profile["id"], req.provider, req.model, input_tokens, output_tokens)
+        update_token_usage(profile["id"], provider, model, input_tokens, output_tokens)
 
     return {
         "reply": reply,
