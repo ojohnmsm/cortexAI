@@ -187,6 +187,38 @@ class ChatRequest(BaseModel):
     use_knowledge: bool = False
     think: bool = False
 
+def get_allowed_openai_models_for_admin() -> List[str]:
+    return [
+        "gpt-5.4-thinking",
+        "gpt-5.4-nano",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-4",
+        "gpt-3.5-turbo",
+        "o1",
+        "o1-mini",
+    ]
+
+
+def apply_chat_model_policy(req: ChatRequest, profile: dict) -> tuple[str, str]:
+    provider = req.provider
+    model = req.model
+
+    if provider == "claude":
+        if profile["role"] not in ("claude_user", "admin"):
+            raise HTTPException(403, "Claude access requires the claude_user role. Contact your administrator.")
+        return provider, model
+
+    if provider != "openai":
+        raise HTTPException(400, "Unsupported provider.")
+
+    if profile["role"] == "admin":
+        if model not in get_allowed_openai_models_for_admin():
+            raise HTTPException(400, "OpenAI model not allowed for admin selection.")
+        return "openai", model
+
+    return "openai", ("gpt-4o" if req.think else "gpt-5.4-nano")
 
 class UpdateProfileRequest(BaseModel):
     user_id: str
