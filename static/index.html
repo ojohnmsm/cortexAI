@@ -963,55 +963,6 @@ function setPersona(v){
   save();
 }
 
-// --- ADMIN ---
-function openAdmin(){loadAdmin();document.getElementById('m-admin').style.display='flex';}
-async function loadAdmin(){
-  const cont=document.getElementById('admin-content');
-  cont.innerHTML='<div style="font-size:13px;color:var(--tx3)">Carregando...</div>';
-  try {
-    const r=await authFetch('/api/admin/users');
-    const users=await r.json();
-    if(!users.length){cont.innerHTML='<div style="font-size:13px;color:var(--tx3)">Nenhum usuario.</div>';return;}
-    const fmt=n=>n>=1000?(n/1000).toFixed(1)+'k':n;
-    cont.innerHTML=`<table class="admin-table">
-      <thead><tr><th>Email</th><th>Role</th><th>Tokens usados</th><th>Limite</th><th>Ativo</th><th>Acoes</th></tr></thead>
-      <tbody>${users.map(u=>{
-        const pct=u.tokens_limit>0?Math.min(100,Math.round(u.tokens_used/u.tokens_limit*100)):0;
-        const rb=u.role==='admin'?'rb-admin':u.role==='claude_user'?'rb-claude':'rb-user';
-        return `<tr>
-          <td style="font-size:13px">${esc(u.email||u.id.slice(0,8))}</td>
-          <td><select class="role-sel" onchange="updRole('${u.id}',this.value)">
-            <option value="user"${u.role==='user'?' selected':''}>user</option>
-            <option value="claude_user"${u.role==='claude_user'?' selected':''}>claude_user</option>
-            <option value="admin"${u.role==='admin'?' selected':''}>admin</option>
-          </select></td>
-          <td><div style="font-size:12px">${fmt(u.tokens_used)} (${pct}%)</div>
-            <div class="token-bar" style="width:120px;margin-top:3px"><div class="token-fill" style="width:${pct}%"></div></div></td>
-          <td><input type="number" style="width:80px;background:var(--sur2);border:1px solid var(--bdr);border-radius:6px;padding:4px 6px;font-size:12px;color:var(--tx)" value="${u.tokens_limit}" onchange="updLimit('${u.id}',this.value)" /></td>
-          <td><input type="checkbox" ${u.active?'checked':''} onchange="updActive('${u.id}',this.checked)" /></td>
-          <td><button class="bd" style="font-size:11px;padding:3px 8px" onclick="resetTok('${u.id}')">Reset tokens</button></td>
-        </tr>`;
-      }).join('')}</tbody></table>`;
-  } catch(e){cont.innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+e.message+'</div>';}
-}
-async function updRole(uid,role){
-  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,role})});toast('Role atualizada!');}
-  catch(e){toast('Erro: '+e.message,'err');}
-}
-async function updLimit(uid,lim){
-  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,tokens_limit:parseInt(lim)})});toast('Limite atualizado!');}
-  catch(e){toast('Erro: '+e.message,'err');}
-}
-async function updActive(uid,active){
-  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,active})});toast('Status atualizado!');}
-  catch(e){toast('Erro: '+e.message,'err');}
-}
-async function resetTok(uid){
-  if(!confirm('Resetar tokens deste usuario?'))return;
-  try{await authFetch('/api/admin/users/reset-tokens',{method:'POST',body:JSON.stringify({user_id:uid})});loadAdmin();toast('Tokens resetados!');}
-  catch(e){toast('Erro: '+e.message,'err');}
-}
-
 // --- CONFIG ---
 function openCfg(){document.getElementById('cfg-url').value=S.backendUrl||'';document.getElementById('m-cfg').style.display='flex';}
 function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().replace(/\/$/,'');save();cm('m-cfg');toast('Configuracoes salvas!');}
@@ -1020,6 +971,49 @@ function saveCfg(){S.backendUrl=document.getElementById('cfg-url').value.trim().
 
 // --- KB MODAL ---
 function openKnowledge(){loadDocs();document.getElementById('m-kb').style.display='flex';}
+
+async function loadDocs(){
+  const box=document.getElementById('doc-list');
+  if(!box) return;
+  box.innerHTML='<div style="font-size:13px;color:var(--tx3)">Carregando...</div>';
+  try{
+    const r=await authFetch('/api/knowledge/documents');
+    const docs=await r.json();
+    if(!r.ok) throw new Error(docs.detail||'Erro ao carregar documentos');
+    if(!Array.isArray(docs)||!docs.length){ box.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhum documento enviado.</div>'; return; }
+    box.innerHTML=docs.map(d=>{
+      const canDelete=S.user&&(S.user.role==='admin'||d.uploaded_by===S.user.id);
+      const meta=[d.chunk_count!=null?`${d.chunk_count} chunks`:null,d.uploaded_by_email||null].filter(Boolean).join(' • ');
+      return `<div class="persona-item"><div style="flex:1"><div class="pn">${esc(d.name||'Documento')}</div><div class="pd">${esc(meta)}</div></div>${canDelete?`<button class="bd" onclick="delDoc('${d.id}')">X</button>`:''}</div>`;
+    }).join('');
+  }catch(e){ box.innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+esc(e.message)+'</div>'; }
+}
+
+async function uploadDoc(){
+  const inp=document.getElementById('doc-file');
+  const file=inp&&inp.files?inp.files[0]:null;
+  if(!file){ toast('Selecione um arquivo','err'); return; }
+  const fd=new FormData(); fd.append('file',file);
+  try{
+    const url=S.backendUrl.replace(/\/$/,'')+'/api/knowledge/upload';
+    const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.detail||'Erro ao enviar documento');
+    inp.value='';
+    toast('Documento enviado!');
+    await loadDocs();
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+}
+
+async function delDoc(id){
+  try{
+    const r=await authFetch('/api/knowledge/documents/'+id,{method:'DELETE'});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(data.detail||'Erro ao excluir documento');
+    toast('Documento removido!');
+    await loadDocs();
+  }catch(e){ toast('Erro: '+e.message,'err'); }
+}
 
 // --- HELPERS ---
 function toggleSB(){S.sidebarOpen=!S.sidebarOpen;document.getElementById('sidebar').classList.toggle('collapsed',!S.sidebarOpen);}
