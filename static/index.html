@@ -94,7 +94,7 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .att-name{font-size:12px;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
 .att-sub{font-size:11px;color:var(--tx3)}
 .att-del{border:none;background:transparent;color:var(--tx3);cursor:pointer;font-size:14px;line-height:1}
-.attach-btn{position:absolute;left:14px;bottom:14px;width:28px;height:28px;border-radius:50%;border:1px solid var(--bdr);background:#fff;color:var(--tx2);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}
+.attach-btn{flex-shrink:0;width:36px;height:36px;border-radius:10px;border:1px solid var(--bdr);background:#fff;color:var(--tx2);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center}
 .attach-btn:hover{border-color:var(--vg);color:var(--vg)}
 
 .kb-btn.on{background:rgba(0,126,122,.1);border-color:var(--vg);color:var(--vg);}
@@ -348,7 +348,10 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
         <select id="per-sel" onchange="setPersona(this.value)"><option value="">Sem personalidade</option></select>
       </div>
     </div>
+    <div id="attachment-list" class="attachment-list"></div>
+    <input type="file" id="chat-file" style="display:none" accept=".pdf,.docx,.txt,.pptx,image/png,image/jpeg,image/webp" onchange="uploadChatAttachment()" />
     <div class="inp-row">
+      <button class="attach-btn" onclick="pickChatFile()" title="Anexar arquivo">+</button>
       <textarea id="msg-in" rows="1" placeholder="Escreva sua mensagem..." onkeydown="handleKey(event)" oninput="ar(this)"></textarea>
       <button id="send-btn" onclick="send()">&#x2191;</button>
     </div>
@@ -460,8 +463,8 @@ let S = {
   loginTab:'login',
 };
 
-const save = () => localStorage.setItem('cortex-ai', JSON.stringify(S));
-const load = () => { try { const d=JSON.parse(localStorage.getItem('cortex-ai')); if(d) S={...S,...d}; } catch(e){} };
+const save = () => { const copy={...S}; delete copy.globalRules; localStorage.setItem('cortex-ai', JSON.stringify(copy)); };
+const load = () => { try { const d=JSON.parse(localStorage.getItem('cortex-ai')); if(d){ delete d.globalRules; S={...S,...d}; } } catch(e){} };
 const getApiBase = () => String(S.backendUrl || location.origin || '').trim().replace(/\/$/,'');
 
 // --- AUTH ---
@@ -950,6 +953,7 @@ async function send(){
         personality_id:S.currentPersona||null,
         use_knowledge:S.useKB,
         attachment_ids:attachmentIds,
+        conversation_id:S.currentChat,
       }),
     });
     const data=await r.json();
@@ -962,8 +966,8 @@ async function send(){
     S.pendingAttachments=[];
     renderAttachmentList();
     save();
-    await syncConversationMessages(chat);
-    await syncConversationMeta(chat);
+    try{await syncConversationMessages(chat);}catch(e){console.error('syncConversationMessages',e);}
+    try{await syncConversationMeta(chat);}catch(e){console.error('syncConversationMeta',e);}
   } catch(e){
     rmThink();toast('Erro: '+e.message,'err');
   }
@@ -983,7 +987,7 @@ async function setPersona(v){
 function openAdmin(){loadAdmin();document.getElementById('m-admin').style.display='flex';}
 async function loadGlobalRules(){
   try{
-    const r=await authFetch('/api/admin/global-rules');
+    const r=await authFetch('/api/admin/global-rules?ts='+Date.now());
     const data=await r.json();
     if(!r.ok) throw new Error(data.detail||'Erro ao carregar regras globais');
     S.globalRules=data||{system_prompt:'',is_active:true};
@@ -995,7 +999,7 @@ async function saveGlobalRules(){
   try{
     const prompt=document.getElementById('gr-prompt').value.trim();
     const is_active=document.getElementById('gr-active').checked;
-    const r=await authFetch('/api/admin/global-rules',{method:'PUT',body:JSON.stringify({system_prompt:prompt,is_active})});
+    const r=await authFetch('/api/admin/global-rules?ts='+Date.now(),{method:'PUT',body:JSON.stringify({system_prompt:prompt,is_active})});
     const data=await r.json();
     if(!r.ok) throw new Error(data.detail||'Erro ao salvar regras globais');
     S.globalRules=data;
