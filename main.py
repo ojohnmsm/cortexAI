@@ -46,6 +46,9 @@ except ImportError:
 
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+GITHUB_MODELS_TOKEN = os.environ.get("GITHUB_MODELS_TOKEN", "")
+GITHUB_MODELS_API_VERSION = os.environ.get("GITHUB_MODELS_API_VERSION", "2022-11-28")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
@@ -84,6 +87,8 @@ async def startup():
     logger.info("CORTEX AI started")
     logger.info("Anthropic: %s", "set" if ANTHROPIC_KEY else "MISSING")
     logger.info("OpenAI: %s", "set" if OPENAI_KEY else "MISSING")
+    logger.info("Gemini: %s", "set" if GEMINI_KEY else "MISSING")
+    logger.info("GitHub Models: %s", "set" if GITHUB_MODELS_TOKEN else "MISSING")
     logger.info("Supabase: %s", "connected" if supa else "not configured")
 
 
@@ -240,6 +245,23 @@ def get_allowed_openai_models_for_admin() -> List[str]:
     ]
 
 
+def get_allowed_gemini_models_for_admin() -> List[str]:
+    return [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+    ]
+
+
+def get_allowed_copilot_models_for_admin() -> List[str]:
+    return [
+        "openai/gpt-4.1",
+        "openai/gpt-4o",
+        "anthropic/claude-3.7-sonnet",
+        "google/gemini-2.0-flash-001",
+    ]
+
+
 def apply_chat_model_policy(req: ChatRequest, profile: dict) -> tuple[str, str]:
     provider = req.provider
     model = req.model
@@ -248,6 +270,20 @@ def apply_chat_model_policy(req: ChatRequest, profile: dict) -> tuple[str, str]:
         if profile["role"] not in ("claude_user", "admin"):
             raise HTTPException(403, "Claude access requires the claude_user role. Contact your administrator.")
         return provider, model
+
+    if provider == "gemini":
+        if profile["role"] != "admin":
+            raise HTTPException(403, "Gemini access is available to admin users only.")
+        if model not in get_allowed_gemini_models_for_admin():
+            raise HTTPException(400, "Gemini model not allowed for admin selection.")
+        return "gemini", model
+
+    if provider == "copilot":
+        if profile["role"] != "admin":
+            raise HTTPException(403, "Copilot access is available to admin users only.")
+        if model not in get_allowed_copilot_models_for_admin():
+            raise HTTPException(400, "Copilot model not allowed for admin selection.")
+        return "copilot", model
 
     if provider != "openai":
         raise HTTPException(400, "Unsupported provider.")
@@ -750,6 +786,19 @@ def make_data_url(content_type: str, content: bytes) -> str:
     return f"data:{content_type};base64," + base64.b64encode(content).decode("ascii")
 
 
+def parse_data_url(data_url: str) -> tuple[Optional[str], Optional[str]]:
+    if not data_url or not data_url.startswith("data:"):
+        return None, None
+    try:
+        header, encoded = data_url.split(",", 1)
+        if ";base64" not in header:
+            return None, None
+        mime_type = header[5:].split(";", 1)[0] or "application/octet-stream"
+        return mime_type, encoded
+    except Exception:
+        return None, None
+
+
 def serialize_chat_attachment(row: dict) -> dict:
     return {
         "id": row.get("id"),
@@ -1016,8 +1065,8 @@ async def chat(req: ChatRequest, request: Request, profile: dict = Depends(get_c
     image_attachments = [a for a in attachments if a.get("attachment_type") == "image"]
 
     if image_attachments:
-        if provider != "openai":
-            raise HTTPException(400, "Imagens no chat estão disponíveis apenas com ChatGPT/OpenAI neste momento.")
+        if provider not in ("openai", "gemini"):
+            raise HTTPException(400, "Imagens no chat estão disponíveis apenas com ChatGPT/OpenAI e Gemini neste momento.")
         if profile["role"] != "admin":
             model = "gpt-4o"
 
@@ -1127,6 +1176,96 @@ async def chat(req: ChatRequest, request: Request, profile: dict = Depends(get_c
                 msg = data.get("error", {}).get("message", "OpenAI API error")
                 raise HTTPException(r.status_code, msg)
             reply = data["choices"][0]["message"]["content"]
+            usage = data.get("usage", {})
+            input_tokens = usage.get("prompt_tokens", 0)
+            output_tokens = usage.get("completion_tokens", 0)
+
+    elif provider == "gemini":
+        if not GEMINI_KEY:
+            raise HTTPException(400, "GEMINI_API_KEY not set on server.")
+
+        gemini_contents = []
+        for msg in messages:
+            role = "model" if msg.get("role") == "assistant" else "user"
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                text_value = " ".join(str(part.get("text", "")) for part in content if isinstance(part, dict) and part.get("type") == "text").strip()
+            else:
+                text_value = str(content or "").strip()
+            if not text_value:
+                continue
+            gemini_contents.append({"role": role, "parts": [{"text": text_value}]})
+
+        if image_attachments and gemini_contents:
+            for idx in range(len(gemini_contents) - 1, -1, -1):
+                if gemini_contents[idx]["role"] == "user":
+                    for att in image_attachments:
+                        mime_type, encoded_data = parse_data_url(att.get("image_data_url", ""))
+                        if mime_type and encoded_data:
+                            gemini_contents[idx]["parts"].append(
+                                {
+                                    "inline_data": {
+                                        "mime_type": mime_type,
+                                        "data": encoded_data,
+                                    }
+                                }
+                            )
+                    break
+
+        body = {"contents": gemini_contents, "generationConfig": {"maxOutputTokens": 4096}}
+        if system_prompt:
+            body["system_instruction"] = {"parts": [{"text": system_prompt}]}
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={
+                    "x-goog-api-key": GEMINI_KEY,
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            data = r.json()
+            if not r.is_success:
+                msg = data.get("error", {}).get("message", "Gemini API error")
+                raise HTTPException(r.status_code, msg)
+            candidates = data.get("candidates") or []
+            if not candidates:
+                raise HTTPException(502, "Gemini returned an empty response.")
+            parts = ((candidates[0].get("content") or {}).get("parts") or [])
+            reply = "\n".join(p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")).strip()
+            usage = data.get("usageMetadata", {})
+            input_tokens = usage.get("promptTokenCount", 0)
+            output_tokens = usage.get("candidatesTokenCount", 0)
+
+    elif provider == "copilot":
+        if not GITHUB_MODELS_TOKEN:
+            raise HTTPException(400, "GITHUB_MODELS_TOKEN not set on server.")
+        if image_attachments:
+            raise HTTPException(400, "Imagens no chat ainda não estão disponíveis para Copilot.")
+
+        copilot_messages = messages.copy()
+        if system_prompt:
+            copilot_messages = [{"role": "system", "content": system_prompt}] + copilot_messages
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            r = await client.post(
+                "https://models.github.ai/inference/chat/completions",
+                headers={
+                    "Authorization": "Bearer " + GITHUB_MODELS_TOKEN,
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": GITHUB_MODELS_API_VERSION,
+                    "Content-Type": "application/json",
+                },
+                json={"model": model, "messages": copilot_messages, "max_tokens": 4096},
+            )
+            data = r.json()
+            if not r.is_success:
+                msg = data.get("error", {}).get("message", "Copilot API error")
+                raise HTTPException(r.status_code, msg)
+            reply = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+            if not reply:
+                raise HTTPException(502, "Copilot returned an empty response.")
             usage = data.get("usage", {})
             input_tokens = usage.get("prompt_tokens", 0)
             output_tokens = usage.get("completion_tokens", 0)
@@ -1491,6 +1630,9 @@ class AuthRequest(BaseModel):
     password: str
 
 
+REGISTER_EMAIL_NOTICE = "Conta criada. Confirme o cadastro no email informado antes de fazer login."
+
+
 @app.post("/api/auth/logout")
 async def logout(response: Response):
     response.delete_cookie("access_token", path="/")
@@ -1587,7 +1729,7 @@ async def register(req: AuthRequest, request: Request, response: Response):
 
     if not session:
         return {
-            "message": "Account created. Check your email to confirm before logging in.",
+            "message": REGISTER_EMAIL_NOTICE,
             "requires_email_confirmation": True,
         }
 
@@ -1604,6 +1746,7 @@ async def register(req: AuthRequest, request: Request, response: Response):
 
     return {
         "access_token": session.access_token,
+        "message": REGISTER_EMAIL_NOTICE,
         "requires_email_confirmation": False,
         "user": {
             "id": user_id,

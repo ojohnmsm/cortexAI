@@ -53,6 +53,8 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .sb-sec{padding:14px 16px 5px;font-size:10px;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,.45);text-transform:uppercase;}
 .new-btn{margin:10px 12px 4px;background:rgba(255,255,255,.1);border:1px dashed rgba(255,255,255,.3);color:#fff;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-family:'ValeSans',sans-serif;font-weight:500;width:calc(100% - 24px);text-align:left;display:flex;align-items:center;gap:8px;transition:all .15s;white-space:nowrap;}
 .new-btn:hover{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.5);}
+.new-btn-icon{width:16px;height:16px;object-fit:contain;border-radius:4px;flex-shrink:0;}
+.new-btn-label{line-height:1;}
 .sb-search-wrap{padding:0 12px 10px;}
 .sb-search-wrap input[type=text]{width:100%;background:rgba(255,255,255,.2)!important;border:1px solid rgba(255,255,255,.35)!important;border-radius:8px;padding:8px 10px;color:#e9ffff!important;font-size:12px;outline:none;}
 .sb-search-wrap input[type=text]::placeholder{color:rgba(233,255,255,.88)!important;}
@@ -102,7 +104,9 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .prov-btn{padding:5px 13px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:700;background:none;border:none;cursor:pointer;color:var(--tx3);transition:all .15s;}
 .prov-btn.ac{background:var(--vg);color:#fff;}
 .prov-btn.ao{background:var(--vb);color:#fff;}
-.prov-btn:hover:not(.ac):not(.ao){color:var(--tx2);background:var(--sur3);}
+.prov-btn.ag{background:#7f52ff;color:#fff;}
+.prov-btn.ap{background:#24292f;color:#fff;}
+.prov-btn:hover:not(.ac):not(.ao):not(.ag):not(.ap){color:var(--tx2);background:var(--sur3);}
 .prov-btn:disabled{opacity:.4;cursor:not-allowed;}
 #model-sel{background:var(--sur2);border:1px solid var(--bdr);color:var(--tx2);padding:5px 9px;border-radius:8px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:500;cursor:pointer;outline:none;max-width:180px;}
 .kb-btn{display:flex;align-items:center;gap:6px;cursor:pointer;padding:5px 10px;border-radius:8px;border:1px solid var(--bdr);background:var(--sur2);font-size:12px;font-weight:600;color:var(--tx3);transition:all .15s;white-space:nowrap;}
@@ -345,7 +349,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
     <button class="bti" onclick="openCfg()">⚙</button>
   </div>
   <div id="user-bar-wrap"></div>
-  <button class="new-btn" onclick="newChat()" title="Criar nova conversa" aria-label="Criar nova conversa">+ &nbsp;Novo chat</button>
+  <button class="new-btn" onclick="newChat()" title="Criar nova conversa" aria-label="Criar nova conversa"><img class="new-btn-icon" src="/static/favicon.ico" alt="" aria-hidden="true"><span class="new-btn-label">Novo chat</span></button>
   <div class="sb-sec">Conversas</div>
   <div class="sb-search-wrap">
     <input id="chat-search" type="text" placeholder="Buscar conversa..." oninput="setChatFilter(this.value)" aria-label="Buscar conversa por título" />
@@ -372,6 +376,8 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
           <div class="prov-sel" role="group" aria-label="Provedor de IA">
             <button class="prov-btn" id="btn-claude" onclick="setProv('claude')">Claude</button>
             <button class="prov-btn" id="btn-openai" onclick="setProv('openai')">ChatGPT</button>
+            <button class="prov-btn" id="btn-gemini" onclick="setProv('gemini')">Gemini</button>
+            <button class="prov-btn" id="btn-copilot" onclick="setProv('copilot')">Copilot</button>
           </div>
           <select id="model-sel" onchange="setModel(this.value)" aria-label="Modelo ativo"></select>
         </div>
@@ -492,7 +498,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
     <div class="mhd"><div class="mt">&#128272; Painel Admin</div><button class="btil" onclick="cm('m-admin')">X</button></div>
     <div class="mbd">
       <div class="info-b">Gerencie usuarios, roles, limites de tokens e regras globais do chat.</div>
-      <div style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Roles: admin = acesso total | claude_user = acesso ao Claude | user = apenas ChatGPT</div>
+      <div style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Roles: admin = acesso total (ChatGPT, Claude, Gemini e Copilot) | claude_user = acesso Claude + ChatGPT | user = apenas ChatGPT</div>
       <div id="admin-content" style="overflow-x:auto">
         <div style="font-size:13px;color:var(--tx3);font-style:italic">Carregando usuarios...</div>
       </div>
@@ -525,7 +531,18 @@ const MODELS = {
     {id:'gpt-4o',l:'GPT-4o'},{id:'gpt-4o-mini',l:'GPT-4o mini'},
     {id:'gpt-4-turbo',l:'GPT-4 Turbo'},{id:'gpt-4',l:'GPT-4'},
     {id:'gpt-3.5-turbo',l:'GPT-3.5 Turbo'},{id:'o1',l:'o1'},{id:'o1-mini',l:'o1-mini'},
-  ]
+  ],
+  gemini:[
+    {id:'gemini-2.5-flash',l:'Gemini 2.5 Flash'},
+    {id:'gemini-2.5-pro',l:'Gemini 2.5 Pro'},
+    {id:'gemini-2.0-flash',l:'Gemini 2.0 Flash'},
+  ],
+  copilot:[
+    {id:'openai/gpt-4.1',l:'Copilot • GPT-4.1'},
+    {id:'openai/gpt-4o',l:'Copilot • GPT-4o'},
+    {id:'anthropic/claude-3.7-sonnet',l:'Copilot • Claude 3.7 Sonnet'},
+    {id:'google/gemini-2.0-flash-001',l:'Copilot • Gemini 2.0 Flash'},
+  ],
 };
 
 let S = {
@@ -620,6 +637,29 @@ function translateErrorMessage(msg){
 function translateAuthError(msg){
   return translateErrorMessage(msg || 'Erro ao autenticar');
 }
+function canUseProvider(provider){
+  const role = (S.user && S.user.role) || 'user';
+  if (role === 'admin') return true;
+  if (provider === 'openai') return true;
+  if (provider === 'claude') return role === 'claude_user';
+  return false;
+}
+function updateProviderAccessControls(){
+  const cfg = {
+    claude: {title:'Sem acesso ao Claude. Contate o administrador.'},
+    openai: {title:''},
+    gemini: {title:'Gemini disponível apenas para admin.'},
+    copilot: {title:'Copilot disponível apenas para admin.'},
+  };
+  Object.keys(cfg).forEach((provider) => {
+    const btn = document.getElementById('btn-'+provider);
+    if (!btn) return;
+    const allowed = canUseProvider(provider);
+    btn.disabled = !allowed;
+    btn.title = allowed ? '' : cfg[provider].title;
+  });
+  if (!canUseProvider(S.provider)) S.provider = 'openai';
+}
 function setLoginTab(t) {
   S.loginTab = t;
   document.querySelectorAll('.ltab').forEach((el,i)=>el.classList.toggle('active',(i===0&&t==='login')||(i===1&&t==='register')));
@@ -653,7 +693,7 @@ async function doLogin() {
     const data = await readApiPayload(r);
     if (!r.ok) throw new Error(data.detail || 'Erro ao autenticar');
     if (isReg) {
-      errEl.textContent = 'Cadastro realizado! Verifique seu email e confirme a conta antes de entrar.';
+      errEl.textContent = data.message || 'Cadastro realizado! Verifique seu email e confirme a conta antes de entrar.';
       errEl.style.display='block';
       setLoginTab('login');
       document.getElementById('l-pass').value = '';
@@ -676,14 +716,7 @@ async function afterLogin() {
   document.getElementById('login-screen').style.display='none';
   renderUserBar();
   if (S.user && S.user.role === 'admin') document.getElementById('admin-btn').style.display='';
-  if (S.user && !['admin','claude_user'].includes(S.user.role)) {
-    document.getElementById('btn-claude').disabled = true;
-    document.getElementById('btn-claude').title = 'Sem acesso ao Claude. Contate o administrador.';
-    if (S.provider === 'claude') { S.provider='openai'; }
-  } else {
-    document.getElementById('btn-claude').disabled = false;
-    document.getElementById('btn-claude').title = '';
-  }
+  updateProviderAccessControls();
   renderModels();
   setProv(S.provider, false);
   document.getElementById('model-sel').value = S.model;
@@ -752,7 +785,8 @@ function getPersonaNameById(id){
   return p?.name || 'Sem personalidade';
 }
 function formatProviderModel(provider, model){
-  const prov = provider==='openai'?'ChatGPT':'Claude';
+  const providerNames = {openai:'ChatGPT', claude:'Claude', gemini:'Gemini', copilot:'Copilot'};
+  const prov = providerNames[provider] || provider || 'IA';
   const item=(MODELS[provider]||[]).find(m=>m.id===model);
   return `${prov} • ${item?item.l:model||'Padrão'}`;
 }
@@ -914,9 +948,15 @@ async function syncConversationMessages(chat){
 
 // --- PROVIDER / MODEL ---
 async function setProv(p, sv=true) {
+  if(!canUseProvider(p)){
+    toast('Sem acesso a este provedor.','err');
+    return;
+  }
   S.provider=p;
   document.getElementById('btn-claude').className='prov-btn'+(p==='claude'?' ac':'');
   document.getElementById('btn-openai').className='prov-btn'+(p==='openai'?' ao':'');
+  document.getElementById('btn-gemini').className='prov-btn'+(p==='gemini'?' ag':'');
+  document.getElementById('btn-copilot').className='prov-btn'+(p==='copilot'?' ap':'');
   renderModels();
   if(sv){
     if(p==='openai' && S.user && S.user.role!=='admin'){
@@ -959,7 +999,7 @@ function applyModelPolicyUI(){
 function renderModels(){
   const sel=document.getElementById('model-sel');
   const isAdmin = !!(S.user && S.user.role==='admin');
-  let models = MODELS[S.provider];
+  let models = MODELS[S.provider] || MODELS.openai;
   if(S.provider==='openai' && !isAdmin){
     models = MODELS.openai.filter(m=>m.id==='gpt-5.4-nano' || m.id==='gpt-4o');
     if(!['gpt-5.4-nano','gpt-4o'].includes(S.model)){
@@ -1073,7 +1113,13 @@ function renderChats(){
       <div class="chat-group-label">${label}</div>
       ${arr.map(id=>{
         const c=S.chats[id];
-        const b=c.provider==='openai'?'<span class="ai-badge bo">GPT</span>':'<span class="ai-badge bc">CLA</span>';
+        const badges = {
+          openai:'<span class="ai-badge bo">GPT</span>',
+          claude:'<span class="ai-badge bc">CLA</span>',
+          gemini:'<span class="ai-badge bc">GEM</span>',
+          copilot:'<span class="ai-badge bc">COP</span>',
+        };
+        const b=badges[c.provider]||'<span class="ai-badge bc">AI</span>';
         const rel=new Date(c.updatedAt||c.createdAt||Date.now()).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
         return `<div class="chat-item${S.currentChat===id?' active':''}" onclick="loadChat('${id}')">
           ${b}<span class="chat-lbl" title="${esc(c.title)}">${esc(c.title)}</span>
@@ -1136,10 +1182,12 @@ function showEmpty(){
   const w=document.getElementById('msgs');w.style.display='none';w.innerHTML='';
 }
 function msgHTML(m){
-  const isU=m.role==='user',p=m.provider||'claude';
+  const isU=m.role==='user',p=m.provider||'openai';
+  const providerName = {openai:'ChatGPT', claude:'Claude', gemini:'Gemini', copilot:'Copilot'};
+  const providerLabel = {openai:'GPT', claude:'CLA', gemini:'GEM', copilot:'COP'};
   const ac=isU?'av-u':(p==='openai'?'av-o':'av-c');
-  const al=isU?'EU':(p==='openai'?'GPT':'AI');
-  const who=isU?'Voce':(p==='openai'?'ChatGPT':'Claude');
+  const al=isU?'EU':(providerLabel[p]||'AI');
+  const who=isU?'Voce':(providerName[p]||'Assistente');
   const time=m.time?new Date(m.time).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
   const kb=m.usedKB?'<span class="kb-tag">&#128218; base</span>':'';
   const tk=m.tokens?`<span style="font-size:10px;color:var(--tx3)">${m.tokens}t</span>`:'';
@@ -1158,7 +1206,8 @@ function showThink(label='Analisando solicitação...'){
   const w=document.getElementById('msgs');w.style.display='flex';
   const d=document.createElement('div');d.id='tk';d.className='msg';
   const p=S.provider;
-  d.innerHTML=`<div class="av ${p==='openai'?'av-o':'av-c'}">${p==='openai'?'GPT':'AI'}</div>
+  const providerLabel = {openai:'GPT', claude:'CLA', gemini:'GEM', copilot:'COP'};
+  d.innerHTML=`<div class="av ${p==='openai'?'av-o':'av-c'}">${providerLabel[p]||'AI'}</div>
     <div class="mb"><div class="thinking"><div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div> ${esc(label)}</div></div>`;
   w.appendChild(d);scrollBot();
 }
