@@ -1506,8 +1506,14 @@ async def login(req: AuthRequest, request: Request, response: Response):
         resp = supa.auth.sign_in_with_password({"email": req.email, "password": req.password})
         session = resp.session
         user_id = resp.user.id
-    except Exception:
+    except Exception as exc:
+        msg = str(exc or "").lower()
+        if "email not confirmed" in msg or ("confirm" in msg and "email" in msg):
+            raise HTTPException(403, "Email not confirmed. Please confirm your account before logging in.")
         raise HTTPException(401, "Invalid email or password.")
+
+    if not session or not session.access_token:
+        raise HTTPException(403, "Email not confirmed. Please confirm your account before logging in.")
 
     profile = supa.table("user_profiles").select("*").eq("id", user_id).single().execute().data
     if not profile:
