@@ -1491,6 +1491,9 @@ class AuthRequest(BaseModel):
     password: str
 
 
+REGISTER_EMAIL_NOTICE = "Conta criada. Confirme o cadastro no email informado antes de fazer login."
+
+
 @app.post("/api/auth/logout")
 async def logout(response: Response):
     response.delete_cookie("access_token", path="/")
@@ -1587,7 +1590,7 @@ async def register(req: AuthRequest, request: Request, response: Response):
 
     if not session:
         return {
-            "message": "Account created. Check your email to confirm before logging in.",
+            "message": REGISTER_EMAIL_NOTICE,
             "requires_email_confirmation": True,
         }
 
@@ -1604,6 +1607,7 @@ async def register(req: AuthRequest, request: Request, response: Response):
 
     return {
         "access_token": session.access_token,
+        "message": REGISTER_EMAIL_NOTICE,
         "requires_email_confirmation": False,
         "user": {
             "id": user_id,
