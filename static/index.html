@@ -652,7 +652,7 @@ async function doLogin() {
     });
     const data = await readApiPayload(r);
     if (!r.ok) throw new Error(data.detail || 'Erro ao autenticar');
-    if (isReg && (data.requires_email_confirmation || !data.access_token)) {
+    if (isReg) {
       errEl.textContent = 'Cadastro realizado! Verifique seu email e confirme a conta antes de entrar.';
       errEl.style.display='block';
       setLoginTab('login');
