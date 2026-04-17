@@ -470,8 +470,26 @@ let S = {
   loginTab:'login',
 };
 
-const save = () => localStorage.setItem('cortex-ai', JSON.stringify(S));
-const load = () => { try { const d=JSON.parse(localStorage.getItem('cortex-ai')); if(d) S={...S,...d}; } catch(e){} };
+function sanitizePersistedState(state){
+  const clone = {...state};
+  delete clone.token;
+  delete clone.user;
+  return clone;
+}
+const save = () => localStorage.setItem('cortex-ai', JSON.stringify(sanitizePersistedState(S)));
+const load = () => {
+  try {
+    const d=JSON.parse(localStorage.getItem('cortex-ai'));
+    if(d){
+      delete d.token;
+      delete d.user;
+      S={...S,...d};
+    }
+  } catch(e){}
+};
+const saveSession = () => sessionStorage.setItem('cortex-ai-session', JSON.stringify({token:S.token,user:S.user}));
+const loadSession = () => { try { const d=JSON.parse(sessionStorage.getItem('cortex-ai-session')); if(d) {S.token=d.token||null; S.user=d.user||null;} } catch(e){} };
+const clearSession = () => sessionStorage.removeItem('cortex-ai-session');
 const getApiBase = () => String(S.backendUrl || location.origin || '').trim().replace(/\/$/,'');
 
 // --- AUTH ---
@@ -542,9 +560,9 @@ async function doLogin() {
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || 'Erro ao autenticar');
-    S.token = data.access_token;
+    S.token = data.access_token || null;
     S.user = data.user;
-    save();
+    save(); saveSession();
     await afterLogin();
   } catch(err) {
     errEl.textContent = translateAuthError(err.message);
@@ -577,9 +595,10 @@ async function afterLogin() {
 }
 
 function doLogout() {
+  try{ fetch(getApiBase() + '/api/auth/logout',{method:'POST',credentials:'include'}); }catch(_){}
   S.token = null; S.user = null; S.chats={}; S.currentChat=null;
   S.personas = []; S.currentPersona = null; S.defaultPersonaId = null;
-  save();
+  save(); clearSession();
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('admin-btn').style.display='none';
   showEmpty();
@@ -602,11 +621,13 @@ function renderUserBar() {
 
 // --- AUTH API calls ---
 async function authFetch(path, opts={}) {
-  if (!S.token) throw new Error('Not authenticated');
   const url = getApiBase() + path;
+  const headers = { 'Content-Type':'application/json', ...(opts.headers||{}) };
+  if (S.token) headers['Authorization'] = 'Bearer ' + S.token;
   const r = await fetch(url, {
     ...opts,
-    headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+S.token, ...(opts.headers||{}) },
+    credentials:'include',
+    headers,
   });
   if (r.status === 401) { doLogout(); throw new Error('Session expired. Please login again.'); }
   return r;
@@ -658,7 +679,8 @@ function uploadWithProgress(url, file, onProgress){
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
     xhr.responseType = 'json';
-    xhr.setRequestHeader('Authorization', 'Bearer ' + S.token);
+    xhr.withCredentials = true;
+    if(S.token) xhr.setRequestHeader('Authorization', 'Bearer ' + S.token);
     xhr.upload.onprogress = (event) => {
       if(event.lengthComputable && onProgress){
         onProgress((event.loaded / event.total) * 100);
@@ -1345,7 +1367,8 @@ async function uploadDoc(file=null){
   const fd=new FormData(); fd.append('file',picked);
   try{
     const url=getApiBase()+'/api/knowledge/upload';
-    const r=await fetch(url,{method:'POST',headers:{'Authorization':'Bearer '+S.token},body:fd});
+    const headers = S.token ? {'Authorization':'Bearer '+S.token} : {};
+    const r=await fetch(url,{method:'POST',headers,body:fd,credentials:'include'});
     const data=await readApiPayload(r);
     if(r.status===401){ doLogout(); throw new Error('Sessão expirada. Faça login novamente.'); }
     if(!r.ok) throw new Error(data.detail||('Erro ao enviar documento ('+r.status+')'));
@@ -1398,6 +1421,7 @@ function md(text){
 // --- INIT ---
 function init(){
   load();
+  loadSession();
   const passEl=document.getElementById('l-pass');
   if(passEl) passEl.addEventListener('input', updatePasswordHints);
   if (!S.backendUrl) {
@@ -1407,9 +1431,21 @@ function init(){
   renderModels();
   setLoginTab(S.loginTab||'login');
   updatePasswordHints();
-  if (S.token && S.user) {
+  if (S.user) {
     afterLogin();
+    return;
   }
+  fetch(getApiBase() + '/api/auth/me', {credentials:'include'})
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if(data && data.id){
+        S.user = data;
+        S.token = null;
+        saveSession();
+        afterLogin();
+      }
+    })
+    .catch(()=>{});
 }
 
 init();
