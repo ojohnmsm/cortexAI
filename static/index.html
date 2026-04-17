@@ -519,15 +519,27 @@ function updatePasswordHints(){
     if (el) el.classList.toggle('ok', ok);
   });
 }
-function translateAuthError(msg){
-  const t = String(msg || 'Erro ao autenticar');
-  if (t.includes('Password should contain')) return 'Senha inválida. Use pelo menos 8 caracteres, com letra maiúscula, letra minúscula, número e caractere especial.';
-  if (t.includes('Invalid login credentials')) return 'Email ou senha inválidos.';
-  if (t.includes('User already registered')) return 'Este email já está cadastrado.';
-  if (t.includes('Email not confirmed')) return 'Conta criada, mas o email ainda não foi confirmado.';
-  if (t.includes('Registration is restricted')) return 'O cadastro é restrito a emails @vale.com.';
-  if (t.includes('Account created. Check your email')) return 'Conta criada! Verifique seu email para confirmar e depois faça login.';
+function translateErrorMessage(msg){
+  const t = String(msg || '').trim();
+  const l = t.toLowerCase();
+  if (!t) return 'Ocorreu um erro inesperado.';
+  if (l.includes('password should contain')) return 'Senha inválida. Use pelo menos 8 caracteres, com letra maiúscula, letra minúscula, número e caractere especial.';
+  if (l.includes('invalid login credentials') || l.includes('invalid email or password')) return 'Email ou senha inválidos.';
+  if (l.includes('user already registered')) return 'Este email já está cadastrado.';
+  if (l.includes('email not confirmed')) return 'Conta criada, mas o email ainda não foi confirmado.';
+  if (l.includes('registration is restricted')) return 'O cadastro é restrito a emails @vale.com.';
+  if (l.includes('account created. check your email')) return 'Conta criada! Verifique seu email para confirmar e depois faça login.';
+  if (l.includes('missing authorization header')) return 'Sessão inválida. Faça login novamente.';
+  if (l.includes('invalid or expired token') || l.includes('invalid token')) return 'Sessão expirada. Faça login novamente.';
+  if (l.includes('session expired')) return 'Sessão expirada. Faça login novamente.';
+  if (l.includes('token limit reached')) return 'Limite de uso atingido. Contate o administrador.';
+  if (l.includes('too many requests')) return 'Muitas tentativas. Aguarde um momento e tente novamente.';
+  if (l.includes('network error') || l.includes('failed to fetch')) return 'Falha de rede. Verifique sua conexão e tente novamente.';
   return t;
+}
+
+function translateAuthError(msg){
+  return translateErrorMessage(msg || 'Erro ao autenticar');
 }
 function setLoginTab(t) {
   S.loginTab = t;
@@ -638,7 +650,7 @@ async function authFetch(path, opts={}) {
     credentials:'include',
     headers,
   });
-  if (r.status === 401) { doLogout(); throw new Error('Session expired. Please login again.'); }
+  if (r.status === 401) { doLogout(); throw new Error('Sessão expirada. Faça login novamente.'); }
   return r;
 }
 
@@ -1413,7 +1425,7 @@ function co(e,id){if(e.target===e.currentTarget)cm(id);}
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
 function ar(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,160)+'px';}
 function fill(t){const e=document.getElementById('msg-in');e.value=t;ar(e);e.focus();}
-function toast(msg,type,dur=2800){const e=document.getElementById('toast');e.textContent=msg;e.className='show'+(type==='err'?' err':'');setTimeout(()=>e.className='',dur);}
+function toast(msg,type,dur=2800){const e=document.getElementById('toast');const safeMsg=(type==='err'?translateErrorMessage(msg):msg);e.textContent=safeMsg;e.className='show'+(type==='err'?' err':'');setTimeout(()=>e.className='',dur);}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function md(text){
   let t=esc(text);
