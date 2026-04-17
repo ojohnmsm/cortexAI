@@ -854,6 +854,7 @@ async function loadConversations(){
       model:item.model||'gpt-5.4-nano',
       personaId:item.personality_id||null,
       useKB:!!item.use_knowledge,
+      autoTitle:!item.title || item.title==='Novo chat',
       createdAt:item.created_at||null,
       updatedAt:item.updated_at||null,
     };
@@ -1006,7 +1007,7 @@ async function newChat(){
   const temp={title:'Novo chat',messages:[],provider:S.provider,model:S.model,personaId:S.currentPersona,useKB:S.useKB};
   try{
     const created=await createConversationRemote(temp);
-    S.chats[created.id]={id:created.id,title:created.title||'Novo chat',messages:created.messages||[],provider:created.provider||S.provider,model:created.model||S.model,personaId:created.personality_id||S.currentPersona,useKB:!!created.use_knowledge};
+    S.chats[created.id]={id:created.id,title:created.title||'Novo chat',messages:created.messages||[],provider:created.provider||S.provider,model:created.model||S.model,personaId:created.personality_id||S.currentPersona,useKB:!!created.use_knowledge,autoTitle:true};
     S.currentChat=created.id;
     save();renderChats();await loadChat(created.id);
   }catch(e){toast('Erro ao criar conversa: '+e.message,'err');}
@@ -1222,7 +1223,6 @@ async function send(){
   chat.provider=S.provider;chat.model=effectiveModel;chat.personaId=S.currentPersona;chat.useKB=S.useKB;
   const uMsg={role:'user',content:text||'[Anexo enviado]',time:Date.now(),provider:S.provider,model:effectiveModel};
   chat.messages.push(uMsg);
-  if(chat.messages.length===1){chat.title=text.slice(0,38)+(text.length>38?'..':'');document.getElementById('chat-title').textContent=chat.title;renderChats();}
   input.value='';ar(input);
   document.getElementById('send-btn').disabled=true;
   appendMsg(uMsg);showThink('Analisando solicitação...');save();
@@ -1249,6 +1249,7 @@ async function send(){
     const aMsg={role:'assistant',content:data.reply||'',time:Date.now(),provider:S.provider,model:effectiveModel,usedKB:!!data.used_knowledge,tokens:data.tokens?.total||null};
     chat.messages.push(aMsg);
     chat.updatedAt=Date.now();
+    await refreshAutoTitle(chat);
     appendMsg(aMsg);
     S.pendingAttachments=[];
     renderAttachmentList();
