@@ -1586,7 +1586,10 @@ async def register(req: AuthRequest, request: Request, response: Response):
         time.sleep(0.25)
 
     if not session:
-        return {"message": "Account created. Check your email to confirm before logging in."}
+        return {
+            "message": "Account created. Check your email to confirm before logging in.",
+            "requires_email_confirmation": True,
+        }
 
     secure_cookie = should_set_secure_cookie(request)
     response.set_cookie(
@@ -1601,6 +1604,7 @@ async def register(req: AuthRequest, request: Request, response: Response):
 
     return {
         "access_token": session.access_token,
+        "requires_email_confirmation": False,
         "user": {
             "id": user_id,
             "email": req.email,
