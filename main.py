@@ -1563,9 +1563,21 @@ async def register(req: AuthRequest, request: Request, response: Response):
 
     # Profile created by trigger; fetch it
     import time
-    time.sleep(0.5)
-    profile = supa.table("user_profiles").select("*").eq("id", user_id).single().execute().data
-    role = profile["role"] if profile else "user"
+    role = "user"
+    for _ in range(3):
+        try:
+            profile_resp = supa.table("user_profiles").select("role").eq("id", user_id).execute()
+            data = profile_resp.data
+            if isinstance(data, list):
+                if data:
+                    role = data[0].get("role") or "user"
+                    break
+            elif isinstance(data, dict):
+                role = data.get("role") or "user"
+                break
+        except Exception:
+            pass
+        time.sleep(0.25)
 
     if not session:
         return {"message": "Account created. Check your email to confirm before logging in."}
