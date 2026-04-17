@@ -54,9 +54,9 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .new-btn{margin:10px 12px 4px;background:rgba(255,255,255,.1);border:1px dashed rgba(255,255,255,.3);color:#fff;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-family:'ValeSans',sans-serif;font-weight:500;width:calc(100% - 24px);text-align:left;display:flex;align-items:center;gap:8px;transition:all .15s;white-space:nowrap;}
 .new-btn:hover{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.5);}
 .sb-search-wrap{padding:0 12px 10px;}
-.sb-search-wrap input{width:100%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:8px 10px;color:#fff;font-size:12px;outline:none;}
-.sb-search-wrap input::placeholder{color:rgba(255,255,255,.62);}
-.sb-search-wrap input:focus{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.18);}
+.sb-search-wrap input{width:100%;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:8px 10px;color:rgba(255,255,255,.95);font-size:12px;outline:none;}
+.sb-search-wrap input::placeholder{color:rgba(255,255,255,.78);}
+.sb-search-wrap input:focus{border-color:rgba(255,255,255,.62);background:rgba(255,255,255,.24);}
 .sb-search-wrap input:-webkit-autofill,
 .sb-search-wrap input:-webkit-autofill:hover,
 .sb-search-wrap input:-webkit-autofill:focus{-webkit-text-fill-color:#fff;box-shadow:0 0 0 1000px rgba(255,255,255,.18) inset;transition:background-color 9999s ease-out 0s;}
@@ -219,12 +219,13 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 
 /* INPUT */
 #inp-area{border-top:1px solid var(--bdr);padding:12px 18px 14px;background:var(--sur);}
-.context-bar{max-width:740px;margin:0 auto 10px;display:flex;flex-wrap:wrap;gap:8px;}
-.ctx-chip{padding:6px 10px;border-radius:999px;border:1px solid var(--bdr);background:var(--sur2);font-size:12px;color:var(--tx2);}
-.ctx-chip strong{color:var(--tx);}
+.context-bar{max-width:740px;margin:0 auto 8px;display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--bdr);border-radius:10px;background:var(--sur2);font-size:12px;color:var(--tx2);}
+.ctx-chip{padding:0;border:none;background:none;color:var(--tx2);font-size:12px;}
+.ctx-chip strong{color:var(--tx);font-weight:700;}
+.ctx-sep{color:var(--tx3);}
 .inp-top{max-width:740px;margin:0 auto 8px;display:flex;align-items:center;gap:8px;}
 .ps-wrap{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx3);font-weight:500;}
-#per-sel{background:var(--sur2);border:1px solid var(--bdr);color:var(--tx2);padding:4px 8px;border-radius:6px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:500;cursor:pointer;outline:none;max-width:170px;}
+#per-sel{background:var(--sur2);border:1px solid var(--bdr);color:var(--tx2);padding:4px 8px;border-radius:6px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:500;cursor:pointer;outline:none;max-width:240px;}
 .inp-row{position:relative;max-width:740px;margin:0 auto;display:flex;align-items:flex-end;gap:10px;background:var(--sur2);border:2px solid var(--bdr);border-radius:14px;padding:10px 12px 10px 52px;transition:border-color .2s;}
 .inp-row:focus-within{border-color:var(--vg);}
 #msg-in{flex:1;background:none;border:none;outline:none;color:var(--tx);font-size:14px;font-family:'ValeSans',sans-serif;resize:none;max-height:160px;line-height:1.5;}
@@ -410,7 +411,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
   <div id="inp-area">
     <div id="context-bar" class="context-bar" aria-live="polite"></div>
     <div class="inp-top">
-      <div class="ps-wrap"><span style="color:var(--vg)">&#10022;</span>
+      <div class="ps-wrap">
         <label for="per-sel" class="sr-only">Personalidade ativa</label>
         <select id="per-sel" onchange="setPersona(this.value)" title="Selecionar personalidade"><option value="">Sem personalidade</option></select>
       </div>
@@ -766,12 +767,12 @@ function renderContextBar(){
   const model = formatProviderModel(S.provider, getEffectiveUserModel());
   const think = S.think ? 'Ativado' : 'Desativado';
   const kb = S.useKB ? 'Ativada' : 'Desativada';
-  const per = getPersonaNameById(S.currentPersona);
   el.innerHTML = `
     <div class="ctx-chip"><strong>Modelo:</strong> ${esc(model)}</div>
+    <span class="ctx-sep">•</span>
     <div class="ctx-chip"><strong>Raciocínio:</strong> ${think}</div>
-    <div class="ctx-chip"><strong>Base de conhecimento:</strong> ${kb}</div>
-    <div class="ctx-chip"><strong>Personalidade:</strong> ${esc(per)}</div>`;
+    <span class="ctx-sep">•</span>
+    <div class="ctx-chip"><strong>Base:</strong> ${kb}</div>`;
 }
 function renderEmptyContext(){
   const el=document.getElementById('empty-context');
