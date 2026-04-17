@@ -1,9 +1,11 @@
-fastapi==0.111.0
+fastapi==0.116.2
 uvicorn[standard]==0.29.0
 httpx==0.27.0
-python-multipart==0.0.9
+python-multipart==0.0.26
 supabase==2.4.6
-pdfplumber==0.11.4
+pdfplumber==0.11.9
 python-docx==1.1.2
 python-pptx==1.0.2
 pydantic==2.7.1
+starlette==0.47.2
+pytest==9.0.3
