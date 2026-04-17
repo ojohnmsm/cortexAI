@@ -558,7 +558,7 @@ async function doLogin() {
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({email, password:pass}),
     });
-    const data = await r.json();
+    const data = await readApiPayload(r);
     if (!r.ok) throw new Error(data.detail || 'Erro ao autenticar');
     S.token = data.access_token || null;
     S.user = data.user;

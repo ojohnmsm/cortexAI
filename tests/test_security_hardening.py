@@ -114,3 +114,19 @@ def test_kb_upload_policy_can_be_restricted(monkeypatch):
     monkeypatch.setenv("KB_UPLOAD_ALLOWED_ROLES", "admin,knowledge_editor")
     assert main.can_upload_knowledge({"role": "user"}) is False
     assert main.can_upload_knowledge({"role": "admin"}) is True
+
+
+def test_register_existing_user_returns_friendly_conflict():
+    class _DupAuth(_FakeAuth):
+        def sign_up(self, payload):
+            raise RuntimeError("User already registered")
+
+    class _DupSupa(_FakeSupa):
+        def __init__(self):
+            self.auth = _DupAuth()
+
+    main.supa = _DupSupa()
+    client = TestClient(main.app)
+    resp = client.post("/api/auth/register", json={"email": "user@vale.com", "password": "Secret123!"})
+    assert resp.status_code == 409
+    assert resp.json().get("detail") == "User already registered."

@@ -1555,7 +1555,10 @@ async def register(req: AuthRequest, request: Request, response: Response):
         user_id = resp.user.id
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
+        msg = str(exc or "").lower()
+        if "already" in msg and ("registered" in msg or "exists" in msg):
+            raise HTTPException(409, "User already registered.")
         raise HTTPException(400, "Registration error.")
 
     # Profile created by trigger; fetch it
