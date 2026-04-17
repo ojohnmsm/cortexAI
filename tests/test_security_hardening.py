@@ -9,9 +9,9 @@ class _FakeUserObj:
 
 
 class _FakeAuthResponse:
-    def __init__(self, user_id="u1"):
+    def __init__(self, user_id="u1", with_session=True):
         self.user = _FakeUserObj(user_id)
-        self.session = type("Session", (), {"access_token": "tok"})()
+        self.session = type("Session", (), {"access_token": "tok"})() if with_session else None
 
 
 class _FakeAuth:
@@ -130,3 +130,19 @@ def test_register_existing_user_returns_friendly_conflict():
     resp = client.post("/api/auth/register", json={"email": "user@vale.com", "password": "Secret123!"})
     assert resp.status_code == 409
     assert resp.json().get("detail") == "User already registered."
+
+
+def test_register_without_session_returns_confirmation_message():
+    class _NoSessionAuth(_FakeAuth):
+        def sign_up(self, payload):
+            return _FakeAuthResponse("u1", with_session=False)
+
+    class _NoSessionSupa(_FakeSupa):
+        def __init__(self):
+            self.auth = _NoSessionAuth()
+
+    main.supa = _NoSessionSupa()
+    client = TestClient(main.app)
+    resp = client.post("/api/auth/register", json={"email": "new.user@vale.com", "password": "Secret123!"})
+    assert resp.status_code == 200
+    assert "Check your email" in resp.json().get("message", "")

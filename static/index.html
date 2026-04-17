@@ -526,6 +526,7 @@ function translateAuthError(msg){
   if (t.includes('User already registered')) return 'Este email já está cadastrado.';
   if (t.includes('Email not confirmed')) return 'Conta criada, mas o email ainda não foi confirmado.';
   if (t.includes('Registration is restricted')) return 'O cadastro é restrito a emails @vale.com.';
+  if (t.includes('Account created. Check your email')) return 'Conta criada! Verifique seu email para confirmar e depois faça login.';
   return t;
 }
 function setLoginTab(t) {
@@ -560,6 +561,14 @@ async function doLogin() {
     });
     const data = await readApiPayload(r);
     if (!r.ok) throw new Error(data.detail || 'Erro ao autenticar');
+    if (isReg && !data.access_token) {
+      errEl.textContent = translateAuthError(data.message || 'Conta criada. Verifique seu email para confirmar o cadastro.');
+      errEl.style.display='block';
+      setLoginTab('login');
+      document.getElementById('l-pass').value = '';
+      document.getElementById('l-pass2').value = '';
+      return;
+    }
     S.token = data.access_token || null;
     S.user = data.user;
     save(); saveSession();
