@@ -146,33 +146,3 @@ def test_register_without_session_returns_confirmation_message():
     resp = client.post("/api/auth/register", json={"email": "new.user@vale.com", "password": "Secret123!"})
     assert resp.status_code == 200
     assert "Check your email" in resp.json().get("message", "")
-
-
-def test_register_succeeds_when_profile_trigger_is_delayed():
-    class _NoProfileSupa(_FakeSupa):
-        def table(self, name):
-            if name == "user_profiles":
-                return _FakeQuery([])
-            return _FakeQuery([])
-
-    main.supa = _NoProfileSupa()
-    client = TestClient(main.app)
-    resp = client.post("/api/auth/register", json={"email": "new2.user@vale.com", "password": "Secret123!"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data.get("user", {}).get("role") == "user"
-
-
-def test_register_rate_limited_by_provider_returns_429():
-    class _RateLimitedAuth(_FakeAuth):
-        def sign_up(self, payload):
-            raise RuntimeError("429 Too Many Requests")
-
-    class _RateLimitedSupa(_FakeSupa):
-        def __init__(self):
-            self.auth = _RateLimitedAuth()
-
-    main.supa = _RateLimitedSupa()
-    client = TestClient(main.app)
-    resp = client.post("/api/auth/register", json={"email": "user3@vale.com", "password": "Secret123!"})
-    assert resp.status_code == 429

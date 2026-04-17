@@ -1559,11 +1559,9 @@ async def register(req: AuthRequest, request: Request, response: Response):
         msg = str(exc or "").lower()
         if "already" in msg and ("registered" in msg or "exists" in msg):
             raise HTTPException(409, "User already registered.")
-        if "too many requests" in msg or "rate limit" in msg or "429" in msg:
-            raise HTTPException(429, "Too many registration attempts. Please wait and try again.")
         raise HTTPException(400, "Registration error.")
 
-    # Profile may be created asynchronously by DB trigger; tolerate propagation delay.
+    # Profile created by trigger; fetch it
     import time
     role = "user"
     for _ in range(3):

@@ -528,8 +528,6 @@ function translateErrorMessage(msg){
   if (l.includes('user already registered')) return 'Este email já está cadastrado.';
   if (l.includes('email not confirmed')) return 'Conta criada, mas o email ainda não foi confirmado.';
   if (l.includes('registration is restricted')) return 'O cadastro é restrito a emails @vale.com.';
-  if (l.includes('registration error')) return 'Não foi possível concluir o cadastro agora. Tente novamente em instantes.';
-  if (l.includes('too many registration attempts')) return 'Muitas tentativas de cadastro. Aguarde um pouco e tente novamente.';
   if (l.includes('account created. check your email')) return 'Conta criada! Verifique seu email para confirmar e depois faça login.';
   if (l.includes('missing authorization header')) return 'Sessão inválida. Faça login novamente.';
   if (l.includes('invalid or expired token') || l.includes('invalid token')) return 'Sessão expirada. Faça login novamente.';
