@@ -53,15 +53,30 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .sb-sec{padding:14px 16px 5px;font-size:10px;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,.45);text-transform:uppercase;}
 .new-btn{margin:10px 12px 4px;background:rgba(255,255,255,.1);border:1px dashed rgba(255,255,255,.3);color:#fff;padding:9px 12px;border-radius:8px;cursor:pointer;font-size:13px;font-family:'ValeSans',sans-serif;font-weight:500;width:calc(100% - 24px);text-align:left;display:flex;align-items:center;gap:8px;transition:all .15s;white-space:nowrap;}
 .new-btn:hover{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.5);}
+.sb-search-wrap{padding:0 12px 10px;}
+.sb-search-wrap input[type=text]{width:100%;background:rgba(255,255,255,.2)!important;border:1px solid rgba(255,255,255,.35)!important;border-radius:8px;padding:8px 10px;color:#e9ffff!important;font-size:12px;outline:none;}
+.sb-search-wrap input[type=text]::placeholder{color:rgba(233,255,255,.88)!important;}
+.sb-search-wrap input[type=text]:focus{border-color:rgba(255,255,255,.7)!important;background:rgba(255,255,255,.3)!important;}
+.sb-search-wrap input[type=text]:-webkit-autofill,
+.sb-search-wrap input[type=text]:-webkit-autofill:hover,
+.sb-search-wrap input[type=text]:-webkit-autofill:focus{-webkit-text-fill-color:#e9ffff;box-shadow:0 0 0 1000px rgba(255,255,255,.25) inset;transition:background-color 9999s ease-out 0s;}
 #chat-list{flex:1;overflow-y:auto;padding:0 10px 10px;}
 #chat-list::-webkit-scrollbar{width:3px;}
 #chat-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px;}
-.chat-item{padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:rgba(255,255,255,.75);display:flex;align-items:center;gap:7px;transition:all .15s;}
+.chat-group{padding:8px 6px 2px;}
+.chat-group-label{font-size:10px;letter-spacing:1.1px;text-transform:uppercase;color:rgba(255,255,255,.45);font-weight:700;padding:4px 6px;}
+.chat-item{padding:10px 10px;border-radius:10px;cursor:pointer;font-size:13px;color:rgba(255,255,255,.8);display:flex;align-items:center;gap:8px;transition:all .15s;position:relative;}
 .chat-item:hover{background:rgba(255,255,255,.1);color:#fff;}
-.chat-item.active{background:rgba(255,255,255,.18);color:#fff;}
+.chat-item.active{background:rgba(255,255,255,.22);color:#fff;border:1px solid rgba(255,255,255,.25);}
 .chat-lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chat-meta{font-size:11px;color:rgba(255,255,255,.65);white-space:nowrap;}
 .chat-del{opacity:0;background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:11px;padding:2px 4px;border-radius:4px;}
 .chat-item:hover .chat-del{opacity:1;}
+.chat-actions{opacity:0;border:none;background:transparent;color:rgba(255,255,255,.7);cursor:pointer;padding:2px 4px;border-radius:6px;}
+.chat-item:hover .chat-actions{opacity:1;}
+.chat-actions-menu{position:absolute;right:8px;top:34px;background:#fff;border:1px solid var(--bdr);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.16);z-index:8;min-width:130px;overflow:hidden;}
+.chat-actions-menu button{width:100%;text-align:left;background:#fff;border:none;padding:8px 10px;font-size:12px;color:var(--tx2);cursor:pointer;}
+.chat-actions-menu button:hover{background:var(--sur2);color:var(--tx);}
 .ai-badge{font-family:'ValeSans',sans-serif;font-weight:700;font-size:9px;letter-spacing:.5px;padding:2px 6px;border-radius:3px;flex-shrink:0;text-transform:uppercase;}
 .bc{background:rgba(255,255,255,.15);color:#fff;}
 .bo{background:rgba(60,181,229,.25);color:#b8e8f8;}
@@ -75,9 +90,14 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 
 /* MAIN */
 #main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
-#topbar{height:54px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;padding:0 16px;gap:10px;background:var(--sur);flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.05);}
+#topbar{min-height:70px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;padding:8px 16px;gap:10px;background:var(--sur);flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.05);}
 #toggle-sb{background:none;border:none;color:var(--vg);cursor:pointer;font-size:20px;padding:4px;border-radius:4px;}
 .tb-title{font-weight:600;font-size:15px;color:var(--tx);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tb-groups{display:flex;gap:8px;align-items:stretch;}
+.tb-group{border:1px solid var(--bdr);background:var(--sur2);padding:6px 8px;border-radius:10px;display:flex;flex-direction:column;gap:4px;}
+.tb-lbl{font-size:10px;text-transform:uppercase;color:var(--tx3);font-weight:700;letter-spacing:.8px;}
+.tb-inline{display:flex;align-items:center;gap:6px;}
+.runtime-status{font-size:11px;color:var(--tx2);padding:6px 10px;border:1px solid var(--bdr);background:var(--sur2);border-radius:16px;white-space:nowrap;}
 .prov-sel{display:flex;background:var(--sur2);border:1px solid var(--bdr);border-radius:8px;overflow:hidden;}
 .prov-btn{padding:5px 13px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:700;background:none;border:none;cursor:pointer;color:var(--tx3);transition:all .15s;}
 .prov-btn.ac{background:var(--vg);color:#fff;}
@@ -156,7 +176,7 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
   60%,100%{left:130%}
 }
 /* texto muda no estado ativo */
-.think-btn.on .t-label::after{content:'ando';}
+.think-btn.on .t-label::after{content:'';}
 
 /* MESSAGES */
 #msgs-wrap{flex:1;overflow-y:auto;padding:24px 0;scroll-behavior:smooth;}
@@ -195,12 +215,17 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px;}
 .chip{background:var(--sur);border:1px solid var(--bdr);color:var(--tx2);padding:7px 14px;border-radius:20px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:500;cursor:pointer;transition:all .15s;}
 .chip:hover{border-color:var(--vg);color:var(--vg);}
+.empty-context{margin-top:4px;background:var(--sur);border:1px solid var(--bdr);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--tx2);}
 
 /* INPUT */
 #inp-area{border-top:1px solid var(--bdr);padding:12px 18px 14px;background:var(--sur);}
+.context-bar{max-width:740px;margin:0 auto 8px;display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--bdr);border-radius:10px;background:var(--sur2);font-size:12px;color:var(--tx2);}
+.ctx-chip{padding:0;border:none;background:none;color:var(--tx2);font-size:12px;}
+.ctx-chip strong{color:var(--tx);font-weight:700;}
+.ctx-sep{color:var(--tx3);}
 .inp-top{max-width:740px;margin:0 auto 8px;display:flex;align-items:center;gap:8px;}
 .ps-wrap{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--tx3);font-weight:500;}
-#per-sel{background:var(--sur2);border:1px solid var(--bdr);color:var(--tx2);padding:4px 8px;border-radius:6px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:500;cursor:pointer;outline:none;max-width:170px;}
+#per-sel{background:var(--sur2);border:1px solid var(--bdr);color:var(--tx2);padding:4px 8px;border-radius:6px;font-size:12px;font-family:'ValeSans',sans-serif;font-weight:500;cursor:pointer;outline:none;max-width:240px;}
 .inp-row{position:relative;max-width:740px;margin:0 auto;display:flex;align-items:flex-end;gap:10px;background:var(--sur2);border:2px solid var(--bdr);border-radius:14px;padding:10px 12px 10px 52px;transition:border-color .2s;}
 .inp-row:focus-within{border-color:var(--vg);}
 #msg-in{flex:1;background:none;border:none;outline:none;color:var(--tx);font-size:14px;font-family:'ValeSans',sans-serif;resize:none;max-height:160px;line-height:1.5;}
@@ -244,6 +269,14 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
 .upload-zone p{font-size:13px;color:var(--tx3);margin-top:6px;}
 .prog-bar{height:4px;background:var(--sur3);border-radius:2px;overflow:hidden;margin-top:6px;}
 .prog-fill{height:100%;background:var(--vg);border-radius:2px;transition:width .3s;}
+.tab-head{display:flex;gap:8px;}
+.tab-btn{border:1px solid var(--bdr);background:var(--sur2);color:var(--tx2);padding:7px 11px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;}
+.tab-btn.active{background:rgba(0,126,122,.12);border-color:var(--vg);color:var(--vg);}
+.badge{font-size:10px;padding:2px 6px;border-radius:10px;background:var(--sur3);color:var(--tx2);display:inline-block;margin-right:5px;}
+.badge.active{background:rgba(0,126,122,.15);color:var(--vg);}
+.badge.global{background:rgba(60,181,229,.2);color:#0b6d89;}
+.badge.default{background:rgba(237,177,17,.2);color:#8d6900;}
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
 
 /* ADMIN TABLE */
 .admin-table{width:100%;border-collapse:collapse;font-size:13px;}
@@ -260,6 +293,12 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
 #toast{position:fixed;bottom:22px;right:22px;background:var(--vg);border-radius:8px;padding:10px 18px;font-size:13px;font-weight:500;color:#fff;z-index:200;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;}
 #toast.show{opacity:1;transform:translateY(0);}
 #toast.err{background:var(--vc);}
+@media (max-width: 980px){
+  #topbar{flex-wrap:wrap;align-items:flex-start;padding:10px 12px;}
+  .tb-title{order:1;flex:1 1 100%;}
+  .tb-groups{order:2;width:100%;overflow-x:auto;padding-bottom:2px;}
+  .runtime-status{order:3;}
+}
 .pw-hint{display:none;margin-top:8px;padding:10px 12px;border:1px solid var(--bdr);border-radius:10px;background:var(--sur2);}
 .pw-hint.show{display:block;}
 .pw-hint-title{font-size:12px;color:var(--tx2);margin-bottom:6px;font-weight:600;}
@@ -306,8 +345,11 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
     <button class="bti" onclick="openCfg()">⚙</button>
   </div>
   <div id="user-bar-wrap"></div>
-  <button class="new-btn" onclick="newChat()">+ &nbsp;Novo chat</button>
+  <button class="new-btn" onclick="newChat()" title="Criar nova conversa" aria-label="Criar nova conversa">+ &nbsp;Novo chat</button>
   <div class="sb-sec">Conversas</div>
+  <div class="sb-search-wrap">
+    <input id="chat-search" type="text" placeholder="Buscar conversa..." oninput="setChatFilter(this.value)" aria-label="Buscar conversa por título" />
+  </div>
   <div id="chat-list"></div>
   <div style="flex:1"></div>
   <div class="sb-ft">
@@ -321,44 +363,66 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
 <!-- MAIN -->
 <main id="main">
   <div id="topbar">
-    <button id="toggle-sb" onclick="toggleSB()">&#9776;</button>
+    <button id="toggle-sb" onclick="toggleSB()" title="Expandir ou recolher menu" aria-label="Expandir ou recolher menu">&#9776;</button>
     <div class="tb-title" id="chat-title">Novo chat</div>
-    <div class="prov-sel">
-      <button class="prov-btn" id="btn-claude" onclick="setProv('claude')">Claude</button>
-      <button class="prov-btn" id="btn-openai" onclick="setProv('openai')">ChatGPT</button>
+    <div class="tb-groups">
+      <div class="tb-group">
+        <div class="tb-lbl">Modelo</div>
+        <div class="tb-inline">
+          <div class="prov-sel" role="group" aria-label="Provedor de IA">
+            <button class="prov-btn" id="btn-claude" onclick="setProv('claude')">Claude</button>
+            <button class="prov-btn" id="btn-openai" onclick="setProv('openai')">ChatGPT</button>
+          </div>
+          <select id="model-sel" onchange="setModel(this.value)" aria-label="Modelo ativo"></select>
+        </div>
+      </div>
+      <div class="tb-group">
+        <div class="tb-lbl">Raciocínio</div>
+        <div class="tb-inline">
+          <button id="think-btn" class="think-btn" onclick="toggleThink()" title="Ativar raciocínio avançado" aria-label="Ativar ou desativar raciocínio avançado"><span class="t-icon" aria-hidden="true">✦</span><span class="t-label">Raciocínio avançado</span></button>
+        </div>
+      </div>
+      <div class="tb-group">
+        <div class="tb-lbl">Contexto</div>
+        <div class="tb-inline">
+          <button id="kb-btn" class="kb-btn" onclick="toggleKB()" aria-label="Ativar ou desativar base de conhecimento"><div class="kb-dot"></div>Base de conhecimento</button>
+        </div>
+      </div>
     </div>
-    <select id="model-sel" onchange="setModel(this.value)"></select>
-    <button id="think-btn" class="think-btn" onclick="toggleThink()" title="Ativar raciocínio avançado"><span class="t-icon" aria-hidden="true">✦</span><span class="t-label">Pensar</span></button>
-    <button id="kb-btn" class="kb-btn" onclick="toggleKB()"><div class="kb-dot"></div>Base</button>
-    <button class="btil" onclick="clearChat()">&#x232B;</button>
+    <div id="runtime-status" class="runtime-status" aria-live="polite">Pronto para responder</div>
+    <button class="btil" onclick="clearChat()" title="Limpar mensagens da conversa" aria-label="Limpar mensagens da conversa">&#x232B;</button>
   </div>
   <div id="msgs-wrap">
     <div id="empty">
-      <div class="ei"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg></div>
-      <div class="et">Ola! Como posso ajudar?</div>
-      <div class="es">Selecione um modelo e comece a conversar</div>
+      <div class="ei"><img src="/static/favicon.ico" alt="CORTEX AI" style="width:30px;height:30px;object-fit:contain;border-radius:6px"></div>
+      <div class="et">Bem-vindo ao seu assistente de trabalho</div>
+      <div class="es">Faça perguntas, compare textos, use sua base de conhecimento e gere respostas profissionais com mais contexto.</div>
+      <div id="empty-context" class="empty-context"></div>
       <div class="chips">
-        <div class="chip" onclick="fill('Resuma este texto para mim')">Resumir texto</div>
-        <div class="chip" onclick="fill('Me ajude a escrever um e-mail profissional sobre')">Escrever e-mail</div>
-        <div class="chip" onclick="fill('Explique de forma simples:')">Explicar conceito</div>
-        <div class="chip" onclick="fill('Analise os dados a seguir:')">Analisar dados</div>
+        <div class="chip" onclick="fill('Analise os principais pontos do documento mais recente da base e destaque riscos e ações sugeridas.')">Analisar documento da base</div>
+        <div class="chip" onclick="fill('Resuma esta norma/procedimento em passos práticos para execução no dia a dia:')">Resumir norma/procedimento</div>
+        <div class="chip" onclick="fill('Compare os dois textos abaixo e mostre diferenças de escopo, risco e linguagem:')">Comparar dois textos</div>
+        <div class="chip" onclick="fill('Explique este conceito técnico com exemplos simples e aplicáveis:')">Explicar conceito técnico</div>
+        <div class="chip" onclick="fill('Escreva um e-mail profissional claro e objetivo com o seguinte contexto:')">Escrever e-mail profissional</div>
       </div>
     </div>
     <div id="msgs" style="display:none"></div>
   </div>
   <div id="inp-area">
+    <div id="context-bar" class="context-bar" aria-live="polite"></div>
     <div class="inp-top">
-      <div class="ps-wrap"><span style="color:var(--vg)">&#10022;</span>
-        <select id="per-sel" onchange="setPersona(this.value)"><option value="">Sem personalidade</option></select>
+      <div class="ps-wrap">
+        <label for="per-sel" class="sr-only">Personalidade ativa</label>
+        <select id="per-sel" onchange="setPersona(this.value)" title="Selecionar personalidade"><option value="">Sem personalidade</option></select>
       </div>
     </div>
     <div id="attachment-list" class="attachment-list"></div>
     <div id="chat-upload-status" class="upload-hint" style="display:none"></div>
     <div class="inp-row">
-      <button class="attach-btn" id="attach-btn" onclick="pickChatFile()" title="Anexar arquivo">+</button>
+      <button class="attach-btn" id="attach-btn" onclick="pickChatFile()" title="Anexar arquivo" aria-label="Anexar arquivo">+</button>
       <input type="file" id="chat-file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,image/*" style="display:none" onchange="uploadChatAttachment()">
-      <textarea id="msg-in" rows="1" placeholder="Escreva sua mensagem..." onkeydown="handleKey(event)" oninput="ar(this)"></textarea>
-      <button id="send-btn" onclick="send()">&#x2191;</button>
+      <textarea id="msg-in" rows="1" placeholder="Descreva o que você precisa. Ex.: &quot;resuma este procedimento em tópicos&quot;" onkeydown="handleKey(event)" oninput="ar(this)"></textarea>
+      <button id="send-btn" onclick="send()" title="Enviar mensagem" aria-label="Enviar mensagem">&#x2191;</button>
     </div>
   </div>
 </main>
@@ -380,11 +444,11 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
   <div class="modal">
     <div class="mhd"><div class="mt">&#128218; Base de conhecimento</div><button class="btil" onclick="cm('m-kb')">X</button></div>
     <div class="mbd">
-      <div class="info-b">Faca upload de PDFs, DOCX ou PPTX. Ative "Base" no topo para a IA consultar esses documentos.</div>
+      <div class="info-b">Faça upload de documentos para enriquecer respostas com contexto real. Ative "Base de conhecimento" no topo para usar este conteúdo na conversa.</div>
       <div class="upload-zone" id="uz" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="onDrop(event)" onclick="document.getElementById('fi').click()">
         <div style="font-size:28px">&#128196;</div>
         <p><strong>Clique ou arraste</strong> arquivos aqui</p>
-        <p>PDF, DOCX, PPTX, TXT - ate 20MB</p>
+        <p>PDF, DOCX, PPTX ou TXT • até 20MB</p>
         <div class="prog-bar" id="pb" style="display:none"><div class="prog-fill" id="pf" style="width:0%"></div></div>
         <div id="us" style="font-size:12px;color:var(--tx3);margin-top:6px"></div>
       </div>
@@ -402,15 +466,23 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
   <div class="modal">
     <div class="mhd"><div class="mt">&#10022; Personalidades</div><button class="btil" onclick="cm('m-per')">X</button></div>
     <div class="mbd">
-      <div id="per-list" style="display:flex;flex-direction:column;gap:8px"></div>
-      <div class="divider"></div>
-      <div><label>Nome</label><input type="text" id="p-name" placeholder="ex: Engenheiro de Confiabilidade" /></div>
-      <div><label>Descricao (opcional)</label><input type="text" id="p-desc" placeholder="Ex: Analise tecnica, causa raiz, criticidade e risco operacional" /></div>
-      <div id="p-scope-wrap" style="display:none"><label>Escopo</label><select id="p-scope"><option value="personal">Pessoal</option><option value="global">Global</option></select></div>
-      <div id="p-default-wrap" style="display:none;margin-top:8px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="p-default" /> Definir como personalidade global padrao</label></div>
-      <div><label>Instrucoes (system prompt)</label><textarea id="p-prompt" placeholder="Voce e um engenheiro de confiabilidade senior. Seja tecnico, analitico, orientado a evidencia, causa raiz, criticidade e risco operacional..."></textarea></div>
+      <div class="tab-head">
+        <button class="tab-btn active" id="per-tab-lib" onclick="switchPersonaTab('library')">Biblioteca</button>
+        <button class="tab-btn" id="per-tab-edit" onclick="switchPersonaTab('editor')">Criar/Editar</button>
+      </div>
+      <div id="per-panel-library">
+        <div id="per-list" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+      <div id="per-panel-editor" style="display:none">
+        <div id="per-editor-hint" class="info-b">Crie uma nova personalidade com instruções avançadas para guiar o comportamento da IA.</div>
+        <div><label>Nome</label><input type="text" id="p-name" placeholder="Ex.: Analista de processos" /></div>
+        <div><label>Descrição (opcional)</label><input type="text" id="p-desc" placeholder="Ex.: síntese clara, foco em eficiência e riscos" /></div>
+        <div id="p-scope-wrap" style="display:none"><label>Escopo</label><select id="p-scope"><option value="personal">Pessoal</option><option value="global">Global</option></select></div>
+        <div id="p-default-wrap" style="display:none;margin-top:8px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="p-default" /> Definir como padrão global</label></div>
+        <div><label>Instruções avançadas</label><div style="font-size:12px;color:var(--tx3);margin-bottom:6px">Essas instruções são o prompt de sistema aplicado em cada resposta.</div><textarea id="p-prompt" placeholder="Defina tom, foco, nível de detalhe e critérios de qualidade para as respostas."></textarea></div>
+      </div>
     </div>
-    <div class="mft"><button class="bs" onclick="cm('m-per')">Fechar</button><button class="bp" onclick="addPersona()">+ Adicionar</button></div>
+    <div class="mft"><button class="bs" onclick="cm('m-per')">Fechar</button><button class="bp" id="per-save-btn" onclick="savePersona()">+ Criar personalidade</button></div>
   </div>
 </div>
 
@@ -463,6 +535,12 @@ let S = {
   defaultPersonaId:null,
   globalRules:{system_prompt:'',is_active:true},
   useKB:false, think:false, sidebarOpen:true,
+  chatFilter:'',
+  chatMenuOpen:null,
+  processingStage:'',
+  docsCount:null,
+  personaTab:'library',
+  editingPersonaId:null,
   pendingAttachments:[],
   chatUploadInProgress:false,
   kbUploadInProgress:false,
@@ -527,6 +605,7 @@ function translateErrorMessage(msg){
   if (l.includes('invalid login credentials') || l.includes('invalid email or password')) return 'Email ou senha inválidos.';
   if (l.includes('user already registered')) return 'Este email já está cadastrado.';
   if (l.includes('email not confirmed')) return 'Conta criada, mas o email ainda não foi confirmado.';
+  if (l.includes('confirm your account before logging in')) return 'Você precisa confirmar seu email antes de entrar na plataforma.';
   if (l.includes('registration is restricted')) return 'O cadastro é restrito a emails @vale.com.';
   if (l.includes('account created. check your email')) return 'Conta criada! Verifique seu email para confirmar e depois faça login.';
   if (l.includes('missing authorization header')) return 'Sessão inválida. Faça login novamente.';
@@ -573,8 +652,8 @@ async function doLogin() {
     });
     const data = await readApiPayload(r);
     if (!r.ok) throw new Error(data.detail || 'Erro ao autenticar');
-    if (isReg && !data.access_token) {
-      errEl.textContent = translateAuthError(data.message || 'Conta criada. Verifique seu email para confirmar o cadastro.');
+    if (isReg && (data.requires_email_confirmation || !data.access_token)) {
+      errEl.textContent = 'Cadastro realizado! Verifique seu email e confirme a conta antes de entrar.';
       errEl.style.display='block';
       setLoginTab('login');
       document.getElementById('l-pass').value = '';
@@ -611,6 +690,9 @@ async function afterLogin() {
   try { await Promise.all([loadPersonalities(), loadConversations()]); } catch (e) { console.error(e); }
   renderChats();
   updateKBBtn();
+  renderContextBar();
+  renderEmptyContext();
+  setProcessingStatus();
   if (S.currentChat && S.chats[S.currentChat]) await loadChat(S.currentChat);
   else { S.pendingAttachments=[]; renderAttachmentList(); renderPerOpts(); }
 }
@@ -623,6 +705,9 @@ function doLogout() {
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('admin-btn').style.display='none';
   showEmpty();
+  renderContextBar();
+  renderEmptyContext();
+  setProcessingStatus();
 }
 
 function renderUserBar() {
@@ -658,8 +743,44 @@ function setThinkLabel(){
   const thinkBtn = document.getElementById('think-btn');
   if(!thinkBtn) return;
   const label = thinkBtn.querySelector('.t-label');
-  if(label) label.textContent = S.think ? 'Pensando' : 'Pensar';
+  if(label) label.textContent = S.think ? 'Raciocínio avançado' : 'Raciocínio avançado';
   thinkBtn.title = S.think ? 'Raciocínio avançado ativo' : 'Ativar raciocínio avançado';
+}
+function getPersonaNameById(id){
+  if(!id) return 'Sem personalidade';
+  const p=(S.personas||[]).find(x=>x.id===id);
+  return p?.name || 'Sem personalidade';
+}
+function formatProviderModel(provider, model){
+  const prov = provider==='openai'?'ChatGPT':'Claude';
+  const item=(MODELS[provider]||[]).find(m=>m.id===model);
+  return `${prov} • ${item?item.l:model||'Padrão'}`;
+}
+function setProcessingStatus(text='Pronto para responder'){
+  S.processingStage = text;
+  const el=document.getElementById('runtime-status');
+  if(el) el.textContent=text;
+}
+function renderContextBar(){
+  const el=document.getElementById('context-bar');
+  if(!el) return;
+  const model = formatProviderModel(S.provider, getEffectiveUserModel());
+  const think = S.think ? 'Ativado' : 'Desativado';
+  const kb = S.useKB ? 'Ativada' : 'Desativada';
+  el.innerHTML = `
+    <div class="ctx-chip"><strong>Modelo:</strong> ${esc(model)}</div>
+    <span class="ctx-sep">•</span>
+    <div class="ctx-chip"><strong>Raciocínio:</strong> ${think}</div>
+    <span class="ctx-sep">•</span>
+    <div class="ctx-chip"><strong>Base:</strong> ${kb}</div>`;
+}
+function renderEmptyContext(){
+  const el=document.getElementById('empty-context');
+  if(!el) return;
+  const docs = S.docsCount==null ? 'documentos ainda não carregados' : `documentos indexados: ${S.docsCount}`;
+  const base = S.useKB ? 'base ativa' : 'base desativada';
+  const persona = getPersonaNameById(S.currentPersona);
+  el.textContent = `${base} • ${docs} • personalidade: ${persona}`;
 }
 function setChatUploadState(uploading, text='', progress=null){
   S.chatUploadInProgress = !!uploading;
@@ -738,6 +859,7 @@ async function loadConversations(){
       model:item.model||'gpt-5.4-nano',
       personaId:item.personality_id||null,
       useKB:!!item.use_knowledge,
+      autoTitle:!item.title || item.title==='Novo chat',
       createdAt:item.created_at||null,
       updatedAt:item.updated_at||null,
     };
@@ -810,6 +932,8 @@ async function setProv(p, sv=true) {
       try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
     }else save();
   }
+  renderContextBar();
+  renderEmptyContext();
 }
 function getEffectiveUserModel(){
   if(S.user && S.user.role!=='admin' && S.provider==='openai'){
@@ -830,6 +954,7 @@ function applyModelPolicyUI(){
     thinkBtn.setAttribute('aria-pressed', S.think ? 'true' : 'false');
   }
   setThinkLabel();
+  renderContextBar();
 }
 function renderModels(){
   const sel=document.getElementById('model-sel');
@@ -852,6 +977,7 @@ async function setModel(v){
     save();
     try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
   }else save();
+  renderContextBar();
 }
 async function toggleKB(){
   S.useKB=!S.useKB;
@@ -861,6 +987,8 @@ async function toggleKB(){
     save();
     try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
   }else save();
+  renderContextBar();
+  renderEmptyContext();
 }
 function updateKBBtn(){const b=document.getElementById('kb-btn');b.className='kb-btn'+(S.useKB?' on':'');}
 async function toggleThink(){
@@ -876,6 +1004,7 @@ async function toggleThink(){
     save();
   }
   renderModels();
+  renderContextBar();
 }
 
 // --- CHATS ---
@@ -883,7 +1012,7 @@ async function newChat(){
   const temp={title:'Novo chat',messages:[],provider:S.provider,model:S.model,personaId:S.currentPersona,useKB:S.useKB};
   try{
     const created=await createConversationRemote(temp);
-    S.chats[created.id]={id:created.id,title:created.title||'Novo chat',messages:created.messages||[],provider:created.provider||S.provider,model:created.model||S.model,personaId:created.personality_id||S.currentPersona,useKB:!!created.use_knowledge};
+    S.chats[created.id]={id:created.id,title:created.title||'Novo chat',messages:created.messages||[],provider:created.provider||S.provider,model:created.model||S.model,personaId:created.personality_id||S.currentPersona,useKB:!!created.use_knowledge,autoTitle:true};
     S.currentChat=created.id;
     save();renderChats();await loadChat(created.id);
   }catch(e){toast('Erro ao criar conversa: '+e.message,'err');}
@@ -897,6 +1026,8 @@ async function loadChat(id){
   S.useKB=!!c.useKB;
   updateKBBtn();
   renderPerOpts();
+  renderContextBar();
+  renderEmptyContext();
   try{
     const r=await authFetch('/api/conversations/'+id+'/messages');
     const data=await readApiPayload(r);
@@ -907,8 +1038,9 @@ async function loadChat(id){
   renderMsgs(c.messages||[]);renderChats();save();
 }
 async function delChat(id,e){
-  e.stopPropagation();
+  if(e) e.stopPropagation();
   try{await authFetch('/api/conversations/'+id,{method:'DELETE'});}catch(err){console.error(err);}
+  S.chatMenuOpen=null;
   delete S.chats[id];
   if(S.currentChat===id){S.currentChat=Object.keys(S.chats)[0]||null; if(S.currentChat) await loadChat(S.currentChat); else {S.pendingAttachments=[];renderAttachmentList();showEmpty();}}
   save();renderChats();
@@ -923,15 +1055,73 @@ async function clearChat(){
 }
 function renderChats(){
   const list=document.getElementById('chat-list');
-  const ids=Object.keys(S.chats).sort((a,b)=>((S.chats[b].updatedAt||0) > (S.chats[a].updatedAt||0)?1:-1));
-  if(!ids.length){list.innerHTML='<div style="padding:8px 14px;font-size:12px;color:rgba(255,255,255,.4);font-style:italic">Nenhuma conversa ainda</div>';return;}
-  list.innerHTML=ids.map(id=>{
+  const ids=Object.keys(S.chats)
+    .filter(id=> (S.chats[id].title||'').toLowerCase().includes((S.chatFilter||'').toLowerCase()))
+    .sort((a,b)=>((S.chats[b].updatedAt||0) > (S.chats[a].updatedAt||0)?1:-1));
+  if(!ids.length){list.innerHTML='<div style="padding:8px 14px;font-size:12px;color:rgba(255,255,255,.5);font-style:italic">Nenhuma conversa encontrada.</div>';return;}
+  const now=new Date();
+  const groups={Hoje:[],Ontem:[],'Esta semana':[],Anteriores:[]};
+  ids.forEach(id=>{
     const c=S.chats[id];
-    const b=c.provider==='openai'?'<span class="ai-badge bo">GPT</span>':'<span class="ai-badge bc">AI</span>';
-    return `<div class="chat-item${S.currentChat===id?' active':''}" onclick="loadChat('${id}')">
-      ${b}<span class="chat-lbl">${esc(c.title)}</span>
-      <button class="chat-del" onclick="delChat('${id}',event)">x</button></div>`;
-  }).join('');
+    const dt=new Date(c.updatedAt||c.createdAt||Date.now());
+    const diff=Math.floor((new Date(now.getFullYear(),now.getMonth(),now.getDate())-new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()))/86400000);
+    const key=diff===0?'Hoje':diff===1?'Ontem':diff<7?'Esta semana':'Anteriores';
+    groups[key].push(id);
+  });
+  list.innerHTML=Object.entries(groups).filter(([,arr])=>arr.length).map(([label,arr])=>`
+    <div class="chat-group">
+      <div class="chat-group-label">${label}</div>
+      ${arr.map(id=>{
+        const c=S.chats[id];
+        const b=c.provider==='openai'?'<span class="ai-badge bo">GPT</span>':'<span class="ai-badge bc">CLA</span>';
+        const rel=new Date(c.updatedAt||c.createdAt||Date.now()).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'});
+        return `<div class="chat-item${S.currentChat===id?' active':''}" onclick="loadChat('${id}')">
+          ${b}<span class="chat-lbl" title="${esc(c.title)}">${esc(c.title)}</span>
+          <span class="chat-meta">${rel}</span>
+          <button class="chat-actions" onclick="toggleChatMenu('${id}',event)" title="Ações da conversa" aria-label="Ações da conversa">⋯</button>
+          ${S.chatMenuOpen===id?`<div class="chat-actions-menu" onclick="event.stopPropagation()"><button onclick="renameChat('${id}')">Renomear</button><button onclick="delChat('${id}',event)">Excluir</button></div>`:''}
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+}
+function setChatFilter(v){ S.chatFilter=v||''; renderChats(); }
+function toggleChatMenu(id,e){ e.stopPropagation(); S.chatMenuOpen=S.chatMenuOpen===id?null:id; renderChats(); }
+async function renameChat(id){
+  const chat=S.chats[id];
+  if(!chat) return;
+  const next=prompt('Novo título da conversa:', chat.title||'');
+  if(next==null) return;
+  const title=next.trim();
+  if(!title) return toast('Título não pode ficar vazio.','err');
+  chat.title=title;
+  chat.autoTitle=false;
+  if(S.currentChat===id) document.getElementById('chat-title').textContent=title;
+  save(); renderChats();
+  try{ await syncConversationMeta(chat); toast('Conversa renomeada.'); }catch(e){ toast('Erro: '+e.message,'err'); }
+}
+function buildContextualTitle(chat){
+  const msgs=(chat?.messages||[]).filter(m=>m.role==='user'||m.role==='assistant').slice(-8);
+  const text=msgs.map(m=>m.content||'').join(' ').toLowerCase();
+  const stop=new Set(['para','como','sobre','entre','com','sem','este','esta','isso','essa','quero','preciso','ajuda','favor','mais','menos','muito','pouco','uma','umas','uns','de','da','do','das','dos','que','por','não','sim','the','and','with','from']);
+  const words=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').match(/[a-z0-9]{4,}/g)||[];
+  const count={};
+  words.forEach(w=>{ if(!stop.has(w)) count[w]=(count[w]||0)+1; });
+  const top=Object.entries(count).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([w])=>w);
+  if(top.length>=2){
+    const cap=(w)=>w.charAt(0).toUpperCase()+w.slice(1);
+    return `${cap(top[0])}: ${top.slice(1).join(' • ')}`.slice(0,62);
+  }
+  const lastUser=[...(chat?.messages||[])].reverse().find(m=>m.role==='user'&&m.content)?.content||'Nova conversa';
+  return lastUser.replace(/\s+/g,' ').trim().slice(0,62);
+}
+async function refreshAutoTitle(chat){
+  if(!chat||chat.autoTitle===false) return;
+  const suggested=buildContextualTitle(chat);
+  if(!suggested) return;
+  chat.title=suggested;
+  if(S.currentChat===chat.id) document.getElementById('chat-title').textContent=suggested;
+  renderChats(); save();
+  try{ await syncConversationMeta(chat); }catch(e){ console.error(e); }
 }
 
 // --- MESSAGES ---
@@ -963,14 +1153,19 @@ function appendMsg(m){
   const w=document.getElementById('msgs');w.style.display='flex';
   const d=document.createElement('div');d.innerHTML=msgHTML(m);w.appendChild(d.firstChild);scrollBot();
 }
-function showThink(){
+function showThink(label='Analisando solicitação...'){
   document.getElementById('empty').style.display='none';
   const w=document.getElementById('msgs');w.style.display='flex';
   const d=document.createElement('div');d.id='tk';d.className='msg';
   const p=S.provider;
   d.innerHTML=`<div class="av ${p==='openai'?'av-o':'av-c'}">${p==='openai'?'GPT':'AI'}</div>
-    <div class="mb"><div class="thinking"><div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div> pensando...</div></div>`;
+    <div class="mb"><div class="thinking"><div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div> ${esc(label)}</div></div>`;
   w.appendChild(d);scrollBot();
+}
+function updateThinkingLabel(label){
+  const t=document.querySelector('#tk .thinking');
+  if(!t) return;
+  t.innerHTML=`<div class="dot d1"></div><div class="dot d2"></div><div class="dot d3"></div> ${esc(label)}`;
 }
 function rmThink(){const e=document.getElementById('tk');if(e)e.remove();}
 function scrollBot(){const w=document.getElementById('msgs-wrap');setTimeout(()=>w.scrollTop=w.scrollHeight,50);}
@@ -987,7 +1182,7 @@ function renderAttachmentList(){
   box.innerHTML=items.map(a=>{
     const thumb=a.attachment_type==='image' && a.image_data_url ? `<img src="${a.image_data_url}" alt="">` : `<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzNCIgaGVpZ2h0PSIzNCIgdmlld0JveD0iMCAwIDM0IDM0Ij48cmVjdCB4PSIxIiB5PSIxIiB3aWR0aD0iMzIiIGhlaWdodD0iMzIiIHJ4PSI4IiBmaWxsPSIjZjNmNGY2IiBzdHJva2U9IiNkZGUiLz48dGV4dCB4PSIxNyIgeT0iMjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM2Yjc3ODUiPuKToTwvdGV4dD48L3N2Zz4=" alt="">`;
     const sub=a.attachment_type==='image'?'Imagem':'Arquivo';
-    return `<div class="att-chip">${thumb}<div class="att-meta"><div class="att-name">${esc(a.file_name||'anexo')}</div><div class="att-sub">${esc(sub)}</div></div><button class="att-del" onclick="removeChatAttachment('${a.id}')" title="Remover">×</button></div>`;
+    return `<div class="att-chip">${thumb}<div class="att-meta"><div class="att-name" title="${esc(a.file_name||'anexo')}">${esc(a.file_name||'anexo')}</div><div class="att-sub">${esc(sub)}</div></div><button class="att-del" onclick="removeChatAttachment('${a.id}')" title="Remover anexo" aria-label="Remover anexo">×</button></div>`;
   }).join('');
 }
 async function loadChatAttachments(){
@@ -1058,12 +1253,14 @@ async function send(){
   chat.provider=S.provider;chat.model=effectiveModel;chat.personaId=S.currentPersona;chat.useKB=S.useKB;
   const uMsg={role:'user',content:text||'[Anexo enviado]',time:Date.now(),provider:S.provider,model:effectiveModel};
   chat.messages.push(uMsg);
-  if(chat.messages.length===1){chat.title=text.slice(0,38)+(text.length>38?'..':'');document.getElementById('chat-title').textContent=chat.title;renderChats();}
   input.value='';ar(input);
   document.getElementById('send-btn').disabled=true;
-  appendMsg(uMsg);showThink();save();
+  appendMsg(uMsg);showThink('Analisando solicitação...');save();
+  setProcessingStatus('Analisando solicitação...');
   try {
     await syncConversationMeta(chat);
+    if(S.useKB){ updateThinkingLabel('Consultando base de conhecimento...'); setProcessingStatus('Consultando base de conhecimento...'); }
+    else { updateThinkingLabel('Gerando resposta...'); setProcessingStatus('Gerando resposta...'); }
     const r=await authFetch('/api/chat',{
       method:'POST',
       body:JSON.stringify({
@@ -1082,25 +1279,21 @@ async function send(){
     const aMsg={role:'assistant',content:data.reply||'',time:Date.now(),provider:S.provider,model:effectiveModel,usedKB:!!data.used_knowledge,tokens:data.tokens?.total||null};
     chat.messages.push(aMsg);
     chat.updatedAt=Date.now();
+    await refreshAutoTitle(chat);
     appendMsg(aMsg);
     S.pendingAttachments=[];
     renderAttachmentList();
     save();
     await syncConversationMessages(chat);
     await syncConversationMeta(chat);
+    setProcessingStatus('Resposta concluída');
+    setTimeout(()=>setProcessingStatus('Pronto para responder'), 1800);
   } catch(e){
     rmThink();toast('Erro: '+e.message,'err');
+    setProcessingStatus('Falha ao gerar resposta');
+    setTimeout(()=>setProcessingStatus('Pronto para responder'), 2200);
   }
   document.getElementById('send-btn').disabled=false;
-}
-
-async function setPersona(v){
-  S.currentPersona=v||null;
-  if(S.currentChat&&S.chats[S.currentChat]){
-    S.chats[S.currentChat].personaId=S.currentPersona;
-    save();
-    try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
-  } else save();
 }
 
 // --- ADMIN ---
@@ -1197,6 +1390,8 @@ async function loadPersonalities(){
   save();
   renderPerOpts();
   renderPerList();
+  renderContextBar();
+  renderEmptyContext();
 }
 async function openPersonas(){
   try{
@@ -1204,50 +1399,100 @@ async function openPersonas(){
     const isAdmin=S.user&&S.user.role==='admin';
     document.getElementById('p-scope-wrap').style.display=isAdmin?'':'none';
     document.getElementById('p-default-wrap').style.display=isAdmin?'':'none';
+    switchPersonaTab('library');
+    resetPersonaEditor();
     document.getElementById('m-per').style.display='flex';
   }catch(e){toast('Erro ao carregar personalidades: '+e.message,'err');}
 }
+function switchPersonaTab(tab){
+  S.personaTab=tab;
+  document.getElementById('per-tab-lib').classList.toggle('active',tab==='library');
+  document.getElementById('per-tab-edit').classList.toggle('active',tab==='editor');
+  document.getElementById('per-panel-library').style.display=tab==='library'?'':'none';
+  document.getElementById('per-panel-editor').style.display=tab==='editor'?'':'none';
+}
+function resetPersonaEditor(){
+  S.editingPersonaId=null;
+  document.getElementById('p-name').value='';
+  document.getElementById('p-desc').value='';
+  document.getElementById('p-prompt').value='';
+  const d=document.getElementById('p-default');
+  if(d) d.checked=false;
+  document.getElementById('per-save-btn').textContent='+ Criar personalidade';
+  document.getElementById('per-editor-hint').textContent='Crie uma nova personalidade com instruções avançadas para guiar o comportamento da IA.';
+}
 function renderPerList(){
   const list=document.getElementById('per-list');
-  if(!S.personas.length){list.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhuma personalidade ainda.</div>';return;}
+  if(!S.personas.length){list.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhuma personalidade criada até agora.</div>';return;}
   list.innerHTML=S.personas.map(p=>{
-    const prompt=p.system_prompt||'';
-    const meta=[p.scope==='global'?'Global':'Pessoal',p.is_default?'Padrao':'' ].filter(Boolean).join(' • ');
+    const using=S.currentPersona===p.id;
+    const canEdit=p.can_edit||p.can_delete||false;
     return `<div class="persona-item${S.currentPersona===p.id?' sel':''}">
-      <div style="flex:1"><div class="pn">${esc(p.name)}</div><div class="pd">${meta?esc(meta)+' — ':''}${esc(prompt.slice(0,90))}${prompt.length>90?'..':''}</div></div>
-      <button class="bs" style="padding:4px 10px;font-size:11px" onclick="usePer('${p.id}')">Usar</button>
+      <div style="flex:1;min-width:0">
+        <div class="pn" title="${esc(p.name)}">${esc(p.name)}</div>
+        <div class="pd">${esc(p.description||'Sem descrição')}</div>
+        <div style="margin-top:6px">
+          <span class="badge ${p.scope==='global'?'global':''}">${p.scope==='global'?'Global':'Pessoal'}</span>
+          ${p.is_default?'<span class="badge default">Padrão</span>':''}
+          ${using?'<span class="badge active">Ativa</span>':''}
+        </div>
+      </div>
+      <button class="bs" style="padding:4px 10px;font-size:11px" onclick="usePer('${p.id}')">${using?'Em uso':'Usar'}</button>
+      ${canEdit?`<button class="bs" style="padding:4px 10px;font-size:11px" onclick="editPer('${p.id}')">Editar</button>`:''}
+      ${canEdit?`<button class="bs" style="padding:4px 10px;font-size:11px" onclick="dupPer('${p.id}')">Duplicar</button>`:''}
       ${p.can_delete?`<button class="bd" onclick="delPer('${p.id}')">X</button>`:''}
     </div>`;
   }).join('');
 }
-async function addPersona(){
+async function savePersona(){
   const name=document.getElementById('p-name').value.trim();
   const description=document.getElementById('p-desc').value.trim();
   const prompt=document.getElementById('p-prompt').value.trim();
   const isAdmin=S.user&&S.user.role==='admin';
   const scope=isAdmin?(document.getElementById('p-scope').value||'personal'):'personal';
   const isDefault=isAdmin&&scope==='global'?document.getElementById('p-default').checked:false;
-  if(!name||!prompt){toast('Preencha nome e instrucoes','err');return;}
+  if(!name||!prompt){toast('Preencha nome e instruções avançadas.','err');return;}
   try{
-    const r=await authFetch('/api/personalities',{
-      method:'POST',
-      body:JSON.stringify({name,description,system_prompt:prompt,scope,is_default:isDefault}),
-    });
+    const creating=!S.editingPersonaId;
+    const url=creating?'/api/personalities':'/api/personalities/'+S.editingPersonaId;
+    const method=creating?'POST':'PUT';
+    const payload=creating?{name,description,system_prompt:prompt,scope,is_default:isDefault}:{name,description,system_prompt:prompt,is_default:isDefault};
+    const r=await authFetch(url,{method,body:JSON.stringify(payload)});
     const data=await r.json();
-    if(!r.ok) throw new Error(data.detail||'Erro ao criar personalidade');
-    document.getElementById('p-name').value='';
-    document.getElementById('p-desc').value='';
-    document.getElementById('p-prompt').value='';
-    if(document.getElementById('p-default')) document.getElementById('p-default').checked=false;
+    if(!r.ok) throw new Error(data.detail||'Erro ao salvar personalidade');
+    resetPersonaEditor();
     await loadPersonalities();
-    toast('Personalidade criada!');
+    switchPersonaTab('library');
+    toast(creating?'Personalidade criada!':'Personalidade atualizada!');
   }catch(e){toast('Erro: '+e.message,'err');}
 }
-function usePer(id){
-  S.currentPersona=id||null;
+async function usePer(id){
+  await setPersona(id||null);
   document.getElementById('per-sel').value=S.currentPersona||'';
-  if(S.currentChat&&S.chats[S.currentChat]) S.chats[S.currentChat].personaId=S.currentPersona;
-  save();renderPerList();toast('Personalidade selecionada');
+  toast('Personalidade selecionada');
+}
+function editPer(id){
+  const p=(S.personas||[]).find(x=>x.id===id);
+  if(!p) return;
+  S.editingPersonaId=id;
+  switchPersonaTab('editor');
+  document.getElementById('p-name').value=p.name||'';
+  document.getElementById('p-desc').value=p.description||'';
+  document.getElementById('p-prompt').value=p.system_prompt||'';
+  if(document.getElementById('p-default')) document.getElementById('p-default').checked=!!p.is_default;
+  document.getElementById('per-save-btn').textContent='Salvar edição';
+  document.getElementById('per-editor-hint').textContent='Edite os campos e salve para atualizar esta personalidade.';
+}
+function dupPer(id){
+  const p=(S.personas||[]).find(x=>x.id===id);
+  if(!p) return;
+  switchPersonaTab('editor');
+  S.editingPersonaId=null;
+  document.getElementById('p-name').value=`${p.name} (cópia)`;
+  document.getElementById('p-desc').value=p.description||'';
+  document.getElementById('p-prompt').value=p.system_prompt||'';
+  document.getElementById('per-save-btn').textContent='+ Criar personalidade';
+  document.getElementById('per-editor-hint').textContent='Revise os campos abaixo para criar uma cópia personalizada.';
 }
 async function delPer(id){
   try{
@@ -1268,60 +1513,19 @@ function renderPerOpts(){
   }).join('');
   sel.innerHTML='<option value="">Sem personalidade</option>'+opts;
   sel.value=S.currentPersona||'';
+  renderContextBar();
+  renderEmptyContext();
 }
-function setPersona(v){
+async function setPersona(v){
   S.currentPersona=v||null;
-  if(S.currentChat&&S.chats[S.currentChat])S.chats[S.currentChat].personaId=S.currentPersona;
-  save();
-}
-
-// --- ADMIN ---
-function openAdmin(){loadAdmin();document.getElementById('m-admin').style.display='flex';}
-async function loadAdmin(){
-  const cont=document.getElementById('admin-content');
-  cont.innerHTML='<div style="font-size:13px;color:var(--tx3)">Carregando...</div>';
-  try {
-    const r=await authFetch('/api/admin/users');
-    const users=await r.json();
-    if(!users.length){cont.innerHTML='<div style="font-size:13px;color:var(--tx3)">Nenhum usuario.</div>';return;}
-    const fmt=n=>n>=1000?(n/1000).toFixed(1)+'k':n;
-    cont.innerHTML=`<table class="admin-table">
-      <thead><tr><th>Email</th><th>Role</th><th>Tokens usados</th><th>Limite</th><th>Ativo</th><th>Acoes</th></tr></thead>
-      <tbody>${users.map(u=>{
-        const pct=u.tokens_limit>0?Math.min(100,Math.round(u.tokens_used/u.tokens_limit*100)):0;
-        const rb=u.role==='admin'?'rb-admin':u.role==='claude_user'?'rb-claude':'rb-user';
-        return `<tr>
-          <td style="font-size:13px">${esc(u.email||u.id.slice(0,8))}</td>
-          <td><select class="role-sel" onchange="updRole('${u.id}',this.value)">
-            <option value="user"${u.role==='user'?' selected':''}>user</option>
-            <option value="claude_user"${u.role==='claude_user'?' selected':''}>claude_user</option>
-            <option value="admin"${u.role==='admin'?' selected':''}>admin</option>
-          </select></td>
-          <td><div style="font-size:12px">${fmt(u.tokens_used)} (${pct}%)</div>
-            <div class="token-bar" style="width:120px;margin-top:3px"><div class="token-fill" style="width:${pct}%"></div></div></td>
-          <td><input type="number" style="width:80px;background:var(--sur2);border:1px solid var(--bdr);border-radius:6px;padding:4px 6px;font-size:12px;color:var(--tx)" value="${u.tokens_limit}" onchange="updLimit('${u.id}',this.value)" /></td>
-          <td><input type="checkbox" ${u.active?'checked':''} onchange="updActive('${u.id}',this.checked)" /></td>
-          <td><button class="bd" style="font-size:11px;padding:3px 8px" onclick="resetTok('${u.id}')">Reset tokens</button></td>
-        </tr>`;
-      }).join('')}</tbody></table>`;
-  } catch(e){cont.innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+e.message+'</div>';}
-}
-async function updRole(uid,role){
-  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,role})});toast('Role atualizada!');}
-  catch(e){toast('Erro: '+e.message,'err');}
-}
-async function updLimit(uid,lim){
-  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,tokens_limit:parseInt(lim)})});toast('Limite atualizado!');}
-  catch(e){toast('Erro: '+e.message,'err');}
-}
-async function updActive(uid,active){
-  try{await authFetch('/api/admin/users/update',{method:'POST',body:JSON.stringify({user_id:uid,active})});toast('Status atualizado!');}
-  catch(e){toast('Erro: '+e.message,'err');}
-}
-async function resetTok(uid){
-  if(!confirm('Resetar tokens deste usuario?'))return;
-  try{await authFetch('/api/admin/users/reset-tokens',{method:'POST',body:JSON.stringify({user_id:uid})});loadAdmin();toast('Tokens resetados!');}
-  catch(e){toast('Erro: '+e.message,'err');}
+  if(S.currentChat&&S.chats[S.currentChat]){
+    S.chats[S.currentChat].personaId=S.currentPersona;
+    save();
+    try{await syncConversationMeta(S.chats[S.currentChat]);}catch(e){console.error(e);}
+  } else save();
+  renderPerList();
+  renderContextBar();
+  renderEmptyContext();
 }
 
 // --- CONFIG ---
@@ -1342,11 +1546,20 @@ async function loadDocs(){
     const r=await authFetch('/api/knowledge/documents');
     const docs=await r.json();
     if(!r.ok) throw new Error(docs.detail||'Erro ao carregar documentos');
-    if(!Array.isArray(docs)||!docs.length){ box.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhum documento enviado.</div>'; return; }
+    S.docsCount=Array.isArray(docs)?docs.length:0;
+    renderEmptyContext();
+    if(!Array.isArray(docs)||!docs.length){ box.innerHTML='<div style="font-size:13px;color:var(--tx3);font-style:italic">Nenhum documento indexado ainda. Envie arquivos para usar na conversa.</div>'; return; }
     box.innerHTML=docs.map(d=>{
       const canDelete=S.user&&(S.user.role==='admin'||d.uploaded_by===S.user.id);
-      const meta=[d.chunk_count!=null?`${d.chunk_count} chunks`:null,d.uploaded_by_email||null].filter(Boolean).join(' • ');
-      return `<div class="persona-item"><div style="flex:1"><div class="pn">${esc(d.name||'Documento')}</div><div class="pd">${esc(meta)}</div></div>${canDelete?`<button class="bd" onclick="delDoc('${d.id}')">X</button>`:''}</div>`;
+      const icon=(d.name||'').toLowerCase().endsWith('.pdf')?'📕':(d.name||'').toLowerCase().includes('.doc')?'📝':(d.name||'').toLowerCase().includes('.ppt')?'📊':'📄';
+      const dt=d.created_at?new Date(d.created_at).toLocaleDateString('pt-BR'):'data indisponível';
+      const meta=[
+        d.char_count!=null?`${d.char_count.toLocaleString('pt-BR')} caracteres`:null,
+        d.chunk_count!=null?`${d.chunk_count} trechos indexados`:null,
+        `Enviado em ${dt}`,
+        d.uploaded_by_email?`por ${d.uploaded_by_email}`:null
+      ].filter(Boolean).join(' • ');
+      return `<div class="doc-item"><div class="doc-icon">${icon}</div><div class="doc-info"><div class="doc-name" title="${esc(d.name||'Documento')}">${esc(d.name||'Documento')}</div><div class="doc-meta">${esc(meta)}</div></div>${canDelete?`<button class="bd" title="Excluir documento" onclick="delDoc('${d.id}')">Excluir</button>`:''}</div>`;
     }).join('');
   }catch(e){ box.innerHTML='<div style="color:var(--vc);font-size:13px">Erro: '+esc(e.message)+'</div>'; }
 }
@@ -1389,16 +1602,19 @@ async function uploadDoc(file=null){
   try{
     const url=getApiBase()+'/api/knowledge/upload';
     const headers = S.token ? {'Authorization':'Bearer '+S.token} : {};
+    setKBUploadState(true, 'Enviando documento...');
     const r=await fetch(url,{method:'POST',headers,body:fd,credentials:'include'});
     const data=await readApiPayload(r);
     if(r.status===401){ doLogout(); throw new Error('Sessão expirada. Faça login novamente.'); }
+    if(r.status===403) throw new Error('Seu perfil não possui permissão para enviar documentos.');
     if(!r.ok) throw new Error(data.detail||('Erro ao enviar documento ('+r.status+')'));
     if(inp) inp.value='';
-    toast('Documento enviado!');
+    toast('Documento enviado e indexado com sucesso!');
     await loadDocs();
   }catch(e){
     toast('Erro: '+e.message,'err');
   }finally{
+    setKBUploadState(false,'');
     const uploading=document.getElementById('kb-uploading');
     if(uploading) uploading.remove();
     if(zone){
@@ -1450,6 +1666,9 @@ function init(){
     save();
   }
   renderModels();
+  renderContextBar();
+  renderEmptyContext();
+  setProcessingStatus();
   setLoginTab(S.loginTab||'login');
   updatePasswordHints();
   if (S.user) {
