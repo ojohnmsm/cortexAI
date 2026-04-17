@@ -57,9 +57,6 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .sb-search-wrap input{width:100%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:8px 10px;color:#fff;font-size:12px;outline:none;}
 .sb-search-wrap input::placeholder{color:rgba(255,255,255,.62);}
 .sb-search-wrap input:focus{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.18);}
-.sb-search-wrap input:-webkit-autofill,
-.sb-search-wrap input:-webkit-autofill:hover,
-.sb-search-wrap input:-webkit-autofill:focus{-webkit-text-fill-color:#fff;box-shadow:0 0 0 1000px rgba(255,255,255,.18) inset;transition:background-color 9999s ease-out 0s;}
 #chat-list{flex:1;overflow-y:auto;padding:0 10px 10px;}
 #chat-list::-webkit-scrollbar{width:3px;}
 #chat-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);border-radius:2px;}
@@ -393,7 +390,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
   </div>
   <div id="msgs-wrap">
     <div id="empty">
-      <div class="ei"><img src="/static/favicon.ico" alt="CORTEX AI" style="width:28px;height:28px;object-fit:contain;filter:brightness(0) invert(1)"></div>
+      <div class="ei"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg></div>
       <div class="et">Bem-vindo ao seu assistente de trabalho</div>
       <div class="es">Faça perguntas, compare textos, use sua base de conhecimento e gere respostas profissionais com mais contexto.</div>
       <div id="empty-context" class="empty-context"></div>
@@ -775,7 +772,7 @@ function renderContextBar(){
 function renderEmptyContext(){
   const el=document.getElementById('empty-context');
   if(!el) return;
-  const docs = S.docsCount==null ? 'documentos ainda não carregados' : `documentos indexados: ${S.docsCount}`;
+  const docs = S.docsCount==null ? 'documentos: --' : `documentos indexados: ${S.docsCount}`;
   const base = S.useKB ? 'base ativa' : 'base desativada';
   const persona = getPersonaNameById(S.currentPersona);
   el.textContent = `${base} • ${docs} • personalidade: ${persona}`;
@@ -1092,34 +1089,9 @@ async function renameChat(id){
   const title=next.trim();
   if(!title) return toast('Título não pode ficar vazio.','err');
   chat.title=title;
-  chat.autoTitle=false;
   if(S.currentChat===id) document.getElementById('chat-title').textContent=title;
   save(); renderChats();
   try{ await syncConversationMeta(chat); toast('Conversa renomeada.'); }catch(e){ toast('Erro: '+e.message,'err'); }
-}
-function buildContextualTitle(chat){
-  const msgs=(chat?.messages||[]).filter(m=>m.role==='user'||m.role==='assistant').slice(-8);
-  const text=msgs.map(m=>m.content||'').join(' ').toLowerCase();
-  const stop=new Set(['para','como','sobre','entre','com','sem','este','esta','isso','essa','quero','preciso','ajuda','favor','mais','menos','muito','pouco','uma','umas','uns','de','da','do','das','dos','que','por','não','sim','the','and','with','from']);
-  const words=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').match(/[a-z0-9]{4,}/g)||[];
-  const count={};
-  words.forEach(w=>{ if(!stop.has(w)) count[w]=(count[w]||0)+1; });
-  const top=Object.entries(count).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([w])=>w);
-  if(top.length>=2){
-    const cap=(w)=>w.charAt(0).toUpperCase()+w.slice(1);
-    return `${cap(top[0])}: ${top.slice(1).join(' • ')}`.slice(0,62);
-  }
-  const lastUser=[...(chat?.messages||[])].reverse().find(m=>m.role==='user'&&m.content)?.content||'Nova conversa';
-  return lastUser.replace(/\s+/g,' ').trim().slice(0,62);
-}
-async function refreshAutoTitle(chat){
-  if(!chat||chat.autoTitle===false) return;
-  const suggested=buildContextualTitle(chat);
-  if(!suggested) return;
-  chat.title=suggested;
-  if(S.currentChat===chat.id) document.getElementById('chat-title').textContent=suggested;
-  renderChats(); save();
-  try{ await syncConversationMeta(chat); }catch(e){ console.error(e); }
 }
 
 // --- MESSAGES ---
