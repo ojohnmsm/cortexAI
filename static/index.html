@@ -1238,27 +1238,37 @@ function exportMsgTable(btn,msgIndex){
   const oldLabel=btn.textContent;
   btn.disabled=true;
   btn.textContent='Gerando Excel...';
-  try{
-    const workbook=`
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head><meta charset="UTF-8"></head>
-      <body>${table.outerHTML}</body></html>`;
-    const blob=new Blob([workbook],{type:'application/vnd.ms-excel;charset=utf-8;'});
-    const link=document.createElement('a');
-    const ts=new Date().toISOString().replace(/[:T]/g,'-').slice(0,16);
-    link.href=URL.createObjectURL(blob);
-    link.download=`relatorio-${Number(msgIndex)+1}-${ts}.xls`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(()=>URL.revokeObjectURL(link.href),1000);
-    toast('Arquivo Excel gerado com sucesso!');
-  }catch(e){
-    toast('Erro ao gerar Excel: '+(e?.message||'falha desconhecida'),'err');
-  }finally{
-    btn.disabled=false;
-    btn.textContent=oldLabel;
-  }
+  return (async()=>{
+    try{
+      const rows=[...table.querySelectorAll('tr')].map(tr=>
+        [...tr.querySelectorAll('th,td')].map(td=>(td.textContent||'').replace(/\s+/g,' ').trim())
+      ).filter(r=>r.some(c=>c));
+      if(!rows.length) throw new Error('Tabela sem dados para exportação.');
+      const r=await authFetch('/api/chat/export/xlsx',{
+        method:'POST',
+        body:JSON.stringify({rows,file_name:`relatorio-${Number(msgIndex)+1}`}),
+      });
+      if(!r.ok){
+        const data=await r.json().catch(()=>({}));
+        throw new Error(data.detail||'Falha ao gerar arquivo.');
+      }
+      const blob=await r.blob();
+      const link=document.createElement('a');
+      const ts=new Date().toISOString().replace(/[:T]/g,'-').slice(0,16);
+      link.href=URL.createObjectURL(blob);
+      link.download=`relatorio-${Number(msgIndex)+1}-${ts}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+      toast('Arquivo Excel (.xlsx) gerado com sucesso!');
+    }catch(e){
+      toast('Erro ao gerar Excel: '+(e?.message||'falha desconhecida'),'err');
+    }finally{
+      btn.disabled=false;
+      btn.textContent=oldLabel;
+    }
+  })();
 }
 
 
