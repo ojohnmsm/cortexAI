@@ -39,6 +39,7 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .login-btn{width:100%;background:var(--vg);color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-family:'ValeSans',sans-serif;font-weight:700;cursor:pointer;transition:background .15s;margin-top:4px;}
 .login-btn:hover{background:#005e5b;}
 .login-err{background:rgba(192,48,94,.08);border:1px solid rgba(192,48,94,.3);color:var(--vc);padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;display:none;}
+.login-info{background:rgba(0,126,122,.08);border:1px solid rgba(0,126,122,.25);color:var(--vg);padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;display:none;line-height:1.45;}
 
 /* SIDEBAR */
 #sidebar{width:268px;min-width:268px;background:var(--vg);display:flex;flex-direction:column;overflow:hidden;transition:width .25s,min-width .25s;flex-shrink:0;}
@@ -335,6 +336,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
       <div class="ltab" onclick="setLoginTab('register')">Criar conta</div>
     </div>
     <div id="login-err" class="login-err"></div>
+    <div id="login-info" class="login-info"></div>
     <div class="lfield"><label>E-mail</label><input type="text" id="l-email" placeholder="seu@email.com" /></div>
     <div class="lfield"><label>Senha</label><input type="password" id="l-pass" placeholder="Senha" onkeydown="if(event.key==='Enter')doLogin()" /></div>
     <div class="lfield" id="l-pass2-wrap" style="display:none"><label>Confirmar senha</label><input type="password" id="l-pass2" placeholder="Repita a senha" /></div>
@@ -573,6 +575,7 @@ let S = {
   kbUploadInProgress:false,
   token:null, user:null,
   loginTab:'login',
+  pendingConfirmationEmail:'',
 };
 
 function sanitizePersistedState(state){
@@ -676,6 +679,12 @@ function setLoginTab(t) {
   document.getElementById('l-pass2-wrap').style.display = t==='register' ? '' : 'none';
   document.getElementById('login-btn').textContent = t==='register' ? 'Criar conta' : 'Entrar';
   document.getElementById('login-err').style.display='none';
+  const infoEl=document.getElementById('login-info');
+  if(infoEl && t==='register') infoEl.style.display='none';
+  if(infoEl && t==='login' && S.pendingConfirmationEmail){
+    infoEl.textContent=`Conta criada para ${S.pendingConfirmationEmail}. Confirme o email antes de entrar.`;
+    infoEl.style.display='block';
+  }
   updatePasswordHints();
 }
 
@@ -683,7 +692,9 @@ async function doLogin() {
   const email = document.getElementById('l-email').value.trim();
   const pass = document.getElementById('l-pass').value;
   const errEl = document.getElementById('login-err');
+  const infoEl = document.getElementById('login-info');
   errEl.style.display='none';
+  if(infoEl) infoEl.style.display='none';
   if (!email || !pass) { errEl.textContent='Preencha email e senha.'; errEl.style.display='block'; return; }
   const isReg = S.loginTab==='register';
   if (isReg) {
@@ -705,6 +716,12 @@ async function doLogin() {
     if (isReg) {
       errEl.textContent = data.message || 'Cadastro realizado! Verifique seu email e confirme a conta antes de entrar.';
       errEl.style.display='block';
+      S.pendingConfirmationEmail = email;
+      save();
+      if(infoEl){
+        infoEl.textContent=`Enviamos um email de confirmação para ${email}. Após confirmar, volte aqui e faça login.`;
+        infoEl.style.display='block';
+      }
       setLoginTab('login');
       document.getElementById('l-pass').value = '';
       document.getElementById('l-pass2').value = '';
@@ -712,10 +729,20 @@ async function doLogin() {
     }
     S.token = data.access_token || null;
     S.user = data.user;
+    S.pendingConfirmationEmail = '';
     save(); saveSession();
     await afterLogin();
   } catch(err) {
-    errEl.textContent = translateAuthError(err.message);
+    const translated = translateAuthError(err.message);
+    if (!isReg && S.pendingConfirmationEmail && email.toLowerCase() === S.pendingConfirmationEmail.toLowerCase()) {
+      errEl.textContent = 'Seu cadastro existe, mas ainda precisa confirmar o email. Verifique sua caixa de entrada (e spam) e depois tente novamente.';
+      if(infoEl){
+        infoEl.textContent='Dica: procure pelo email de confirmação do Supabase e clique no link para ativar a conta.';
+        infoEl.style.display='block';
+      }
+    } else {
+      errEl.textContent = translated;
+    }
     errEl.style.display='block';
   }
   document.getElementById('login-btn').textContent = isReg ? 'Criar conta' : 'Entrar';
