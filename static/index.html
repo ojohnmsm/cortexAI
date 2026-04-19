@@ -1228,9 +1228,17 @@ function msgHTML(m,msgIndex=0){
   const time=m.time?new Date(m.time).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
   const kb=m.usedKB?'<span class="kb-tag">&#128218; base</span>':'';
   const tk=m.tokens?`<span style="font-size:10px;color:var(--tx3)">${m.tokens}t</span>`:'';
-  const content=isU?esc(m.content):md(m.content);
-  const hasTable=!isU&&content.includes('<table>');
-  const enableExport=hasTable&&!isU&&!!m.excelExportEnabled;
+  let content=isU?esc(m.content):md(m.content);
+  const requestedExport=!isU&&!!m.excelExportEnabled;
+  let hasTable=!isU&&content.includes('<table>');
+  if(requestedExport && !hasTable){
+    const csvRows=extractCsvRows(m.content);
+    if(csvRows){
+      content += `<p><strong>Tabela convertida automaticamente do CSV para exportação:</strong></p>${csvRowsToTableHtml(csvRows)}`;
+      hasTable=true;
+    }
+  }
+  const enableExport=hasTable&&requestedExport;
   const body=`<div class="mc">${content}</div>`;
   const actions=enableExport?`<div class="msg-actions"><button class="exp-btn" onclick="exportMsgTable(this,${msgIndex})" aria-label="Exportar tabela para Excel">Gerar Excel</button></div>`:'';
   return `<div class="msg${isU?' user':''}">
@@ -1785,6 +1793,41 @@ function shouldOfferExcelExport(text){
     /\bmont(ar|e)\b.*\bplanilha\b/,
   ];
   return patterns.some(rx=>rx.test(t));
+}
+function parseCsvLine(line){
+  const out=[]; let cur=''; let inQuotes=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch==='"'){
+      if(inQuotes && line[i+1]==='"'){ cur+='"'; i++; continue; }
+      inQuotes=!inQuotes; continue;
+    }
+    if(ch===',' && !inQuotes){ out.push(cur.trim()); cur=''; continue; }
+    cur+=ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+function extractCsvRows(text){
+  const src=String(text||'');
+  const blockMatch=src.match(/```(?:csv)?\s*\n([\s\S]*?)```/i);
+  const candidate=(blockMatch?blockMatch[1]:src).trim();
+  const lines=candidate.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(lines.length<2) return null;
+  const commaRich=lines.filter(l=>(l.match(/,/g)||[]).length>=1).length;
+  if(commaRich<2) return null;
+  const rows=lines.map(parseCsvLine);
+  const width=Math.max(...rows.map(r=>r.length));
+  if(width<2) return null;
+  return rows.map(r=>r.concat(Array(Math.max(0,width-r.length)).fill('')));
+}
+function csvRowsToTableHtml(rows){
+  if(!rows||rows.length<2) return '';
+  const head=rows[0];
+  const body=rows.slice(1);
+  const th=head.map(c=>`<th>${esc(c)}</th>`).join('');
+  const tr=body.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('');
+  return `<div class="tbl-wrap"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
 }
 function md(text){
   const raw=String(text||'').replace(/\r\n?/g,'\n');
