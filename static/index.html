@@ -1203,8 +1203,9 @@ function msgHTML(m,msgIndex=0){
   const tk=m.tokens?`<span style="font-size:10px;color:var(--tx3)">${m.tokens}t</span>`:'';
   const content=isU?esc(m.content):md(m.content);
   const hasTable=!isU&&content.includes('<table>');
+  const enableExport=hasTable&&!isU&&!!m.excelExportEnabled;
   const body=`<div class="mc">${content}</div>`;
-  const actions=hasTable?`<div class="msg-actions"><button class="exp-btn" onclick="exportMsgTable(this,${msgIndex})" aria-label="Exportar tabela para Excel">Gerar Excel</button></div>`:'';
+  const actions=enableExport?`<div class="msg-actions"><button class="exp-btn" onclick="exportMsgTable(this,${msgIndex})" aria-label="Exportar tabela para Excel">Gerar Excel</button></div>`:'';
   return `<div class="msg${isU?' user':''}">
     <div class="av ${ac}">${al}</div>
     <div class="mb"><div class="mm">${who} <span>${time}</span>${kb}${tk}</div>${body}${actions}</div></div>`;
@@ -1341,6 +1342,7 @@ async function removeChatAttachment(id){
 async function send(){
   const input=document.getElementById('msg-in');
   const text=input.value.trim();
+  const excelRequested=shouldOfferExcelExport(text);
   const attachmentIds=currentChatAttachmentIds();
   if(!text && !attachmentIds.length)return;
   if(S.chatUploadInProgress){toast('Aguarde o envio do anexo terminar.','err');return;}
@@ -1377,7 +1379,7 @@ async function send(){
     const data=await readApiPayload(r);
     if(!r.ok) throw new Error(data.detail||'Erro ao enviar');
     rmThink();
-    const aMsg={role:'assistant',content:data.reply||'',time:Date.now(),provider:S.provider,model:effectiveModel,usedKB:!!data.used_knowledge,tokens:data.tokens?.total||null};
+    const aMsg={role:'assistant',content:data.reply||'',time:Date.now(),provider:S.provider,model:effectiveModel,usedKB:!!data.used_knowledge,tokens:data.tokens?.total||null,excelExportEnabled:excelRequested};
     chat.messages.push(aMsg);
     chat.updatedAt=Date.now();
     await refreshAutoTitle(chat);
@@ -1744,6 +1746,19 @@ function ar(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,
 function fill(t){const e=document.getElementById('msg-in');e.value=t;ar(e);e.focus();}
 function toast(msg,type,dur=2800){const e=document.getElementById('toast');const safeMsg=(type==='err'?translateErrorMessage(msg):msg);e.textContent=safeMsg;e.className='show'+(type==='err'?' err':'');setTimeout(()=>e.className='',dur);}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function shouldOfferExcelExport(text){
+  const t=String(text||'').toLowerCase();
+  if(!t.trim()) return false;
+  const patterns=[
+    /\bplanilha\b/,
+    /\bexcel\b/,
+    /\bxlsx\b/,
+    /\bexport(ar|e)?\b.*\b(planilha|excel)\b/,
+    /\bger(ar|e)\b.*\b(planilha|excel)\b/,
+    /\bmont(ar|e)\b.*\bplanilha\b/,
+  ];
+  return patterns.some(rx=>rx.test(t));
+}
 function md(text){
   const raw=String(text||'').replace(/\r\n?/g,'\n');
   const blocks=[];
