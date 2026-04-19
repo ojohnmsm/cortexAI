@@ -9,6 +9,7 @@ import zipfile
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from collections import defaultdict, deque
+from xml.sax.saxutils import escape as xml_escape
 
 import httpx
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Header, Cookie, Request, Response
@@ -179,6 +180,7 @@ RATE_LIMIT_WINDOWS = {
     "chat": (60, 20),
     "upload": (60, 10),
     "list": (60, 60),
+    "export": (60, 20),
 }
 RATE_LIMIT_BUCKETS: Dict[str, deque] = defaultdict(deque)
 
@@ -317,6 +319,11 @@ class UpdateProfileRequest(BaseModel):
     role: Optional[str] = None
     tokens_limit: Optional[int] = None
     active: Optional[bool] = None
+
+
+class ExcelExportRequest(BaseModel):
+    rows: List[List[str]]
+    file_name: Optional[str] = None
 
 
 
@@ -726,6 +733,92 @@ def sanitize_filename(filename: str) -> str:
     return safe.strip()[:120] or "arquivo"
 
 
+def excel_col_name(index: int) -> str:
+    name = ""
+    n = index + 1
+    while n:
+        n, rem = divmod(n - 1, 26)
+        name = chr(65 + rem) + name
+    return name
+
+
+def build_xlsx_bytes(rows: List[List[str]]) -> bytes:
+    sheet_rows = []
+    for r_idx, row in enumerate(rows, start=1):
+        cells = []
+        for c_idx, value in enumerate(row, start=1):
+            ref = f"{excel_col_name(c_idx - 1)}{r_idx}"
+            text = xml_escape(str(value or ""))
+            if text.strip() == "":
+                continue
+            cells.append(f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>')
+        sheet_rows.append(f'<row r="{r_idx}">{"".join(cells)}</row>')
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        "<sheetData>"
+        + "".join(sheet_rows) +
+        "</sheetData>"
+        "</worksheet>"
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Dados" sheetId="1" r:id="rId1"/></sheets>'
+        "</workbook>"
+    )
+    content_types_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        "</Types>"
+    )
+    root_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+    workbook_rels_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" '
+        'Target="styles.xml"/>'
+        "</Relationships>"
+    )
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+        '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+        '<borders count="1"><border/></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+        "</styleSheet>"
+    )
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types_xml)
+        zf.writestr("_rels/.rels", root_rels_xml)
+        zf.writestr("xl/workbook.xml", workbook_xml)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet_xml)
+        zf.writestr("xl/styles.xml", styles_xml)
+    return out.getvalue()
+
+
 def is_docx(content: bytes) -> bool:
     try:
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
@@ -1034,6 +1127,40 @@ async def delete_chat_attachment(attachment_id: str, profile: dict = Depends(get
         raise HTTPException(404, "Attachment not found.")
     supa.table("ai_chat_attachments").delete().eq("id", attachment_id).eq("user_id", profile["id"]).execute()
     return {"deleted": attachment_id}
+
+
+@app.post("/api/chat/export/xlsx")
+async def export_chat_table_xlsx(req: ExcelExportRequest, request: Request, profile: dict = Depends(get_current_user)):
+    enforce_rate_limit("export", request, profile)
+    if not req.rows or not isinstance(req.rows, list):
+        raise HTTPException(400, "Nenhum dado de tabela foi enviado.")
+    if len(req.rows) > 10000:
+        raise HTTPException(400, "Tabela muito grande para exportação (máx. 10.000 linhas).")
+
+    normalized_rows: List[List[str]] = []
+    max_cols = 0
+    for row in req.rows:
+        if not isinstance(row, list):
+            continue
+        normalized = [str(c or "")[:20000] for c in row][:200]
+        normalized_rows.append(normalized)
+        max_cols = max(max_cols, len(normalized))
+
+    if not normalized_rows or max_cols == 0:
+        raise HTTPException(400, "Tabela vazia.")
+
+    for row in normalized_rows:
+        if len(row) < max_cols:
+            row.extend([""] * (max_cols - len(row)))
+
+    filename = sanitize_filename((req.file_name or "relatorio") + ".xlsx")
+    payload = build_xlsx_bytes(normalized_rows)
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers=headers,
+    )
 
 
 # --- Chat ---
