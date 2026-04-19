@@ -209,6 +209,10 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .mc th{background:var(--sur2);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--tx2);}
 .mc tbody tr:nth-child(even){background:rgba(0,126,122,.03);}
 .mc tbody tr:last-child td{border-bottom:none;}
+.msg-actions{margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.exp-btn{border:1px solid var(--bdr2);background:var(--sur2);color:var(--tx2);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;}
+.exp-btn:hover{border-color:var(--vg);color:var(--vg);}
+.exp-btn:disabled{opacity:.65;cursor:not-allowed;}
 .msg.user .mc{background:var(--vg);color:#fff;border-radius:4px 14px 14px 14px;padding:10px 14px;display:inline-block;max-width:100%;}
 .msg.user .mc code{background:rgba(255,255,255,.15);border-color:transparent;color:#fff;}
 .thinking{display:flex;align-items:center;gap:6px;color:var(--tx3);font-size:13px;font-style:italic;}
@@ -1181,13 +1185,13 @@ function renderMsgs(msgs){
   const w=document.getElementById('msgs'),e=document.getElementById('empty');
   if(!msgs.length){showEmpty();return;}
   e.style.display='none';w.style.display='flex';
-  w.innerHTML=msgs.map(msgHTML).join('');scrollBot();
+  w.innerHTML=msgs.map((m,i)=>msgHTML(m,i)).join('');scrollBot();
 }
 function showEmpty(){
   document.getElementById('empty').style.display='';
   const w=document.getElementById('msgs');w.style.display='none';w.innerHTML='';
 }
-function msgHTML(m){
+function msgHTML(m,msgIndex=0){
   const isU=m.role==='user',p=m.provider||'openai';
   const providerName = {openai:'ChatGPT', claude:'Claude', gemini:'Gemini', copilot:'Copilot'};
   const providerLabel = {openai:'GPT', claude:'CLA', gemini:'GEM', copilot:'COP'};
@@ -1197,10 +1201,13 @@ function msgHTML(m){
   const time=m.time?new Date(m.time).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
   const kb=m.usedKB?'<span class="kb-tag">&#128218; base</span>':'';
   const tk=m.tokens?`<span style="font-size:10px;color:var(--tx3)">${m.tokens}t</span>`:'';
-  const body=isU?`<div class="mc">${esc(m.content)}</div>`:`<div class="mc">${md(m.content)}</div>`;
+  const content=isU?esc(m.content):md(m.content);
+  const hasTable=!isU&&content.includes('<table>');
+  const body=`<div class="mc">${content}</div>`;
+  const actions=hasTable?`<div class="msg-actions"><button class="exp-btn" onclick="exportMsgTable(this,${msgIndex})" aria-label="Exportar tabela para Excel">Gerar Excel</button></div>`:'';
   return `<div class="msg${isU?' user':''}">
     <div class="av ${ac}">${al}</div>
-    <div class="mb"><div class="mm">${who} <span>${time}</span>${kb}${tk}</div>${body}</div></div>`;
+    <div class="mb"><div class="mm">${who} <span>${time}</span>${kb}${tk}</div>${body}${actions}</div></div>`;
 }
 function appendMsg(m){
   document.getElementById('empty').style.display='none';
@@ -1224,6 +1231,35 @@ function updateThinkingLabel(label){
 }
 function rmThink(){const e=document.getElementById('tk');if(e)e.remove();}
 function scrollBot(){const w=document.getElementById('msgs-wrap');setTimeout(()=>w.scrollTop=w.scrollHeight,50);}
+function exportMsgTable(btn,msgIndex){
+  const scope=btn.closest('.mb');
+  const table=scope?scope.querySelector('.mc table'):null;
+  if(!table){ toast('Nenhuma tabela encontrada para exportar.','err'); return; }
+  const oldLabel=btn.textContent;
+  btn.disabled=true;
+  btn.textContent='Gerando Excel...';
+  try{
+    const workbook=`
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head><meta charset="UTF-8"></head>
+      <body>${table.outerHTML}</body></html>`;
+    const blob=new Blob([workbook],{type:'application/vnd.ms-excel;charset=utf-8;'});
+    const link=document.createElement('a');
+    const ts=new Date().toISOString().replace(/[:T]/g,'-').slice(0,16);
+    link.href=URL.createObjectURL(blob);
+    link.download=`relatorio-${Number(msgIndex)+1}-${ts}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+    toast('Arquivo Excel gerado com sucesso!');
+  }catch(e){
+    toast('Erro ao gerar Excel: '+(e?.message||'falha desconhecida'),'err');
+  }finally{
+    btn.disabled=false;
+    btn.textContent=oldLabel;
+  }
+}
 
 
 function currentChatAttachmentIds(){
