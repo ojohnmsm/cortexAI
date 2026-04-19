@@ -203,6 +203,12 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .mc p{margin-bottom:10px;}.mc p:last-child{margin-bottom:0;}
 .mc ul,.mc ol{padding-left:20px;margin-bottom:10px;}.mc li{margin-bottom:4px;}
 .mc strong{font-weight:700;}
+.mc .tbl-wrap{overflow-x:auto;margin:10px 0;border:1px solid var(--bdr);border-radius:10px;background:#fff;}
+.mc table{width:100%;border-collapse:collapse;min-width:420px;font-size:13px;line-height:1.45;}
+.mc th,.mc td{padding:8px 10px;border-bottom:1px solid var(--bdr);text-align:left;vertical-align:top;}
+.mc th{background:var(--sur2);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--tx2);}
+.mc tbody tr:nth-child(even){background:rgba(0,126,122,.03);}
+.mc tbody tr:last-child td{border-bottom:none;}
 .msg.user .mc{background:var(--vg);color:#fff;border-radius:4px 14px 14px 14px;padding:10px 14px;display:inline-block;max-width:100%;}
 .msg.user .mc code{background:rgba(255,255,255,.15);border-color:transparent;color:#fff;}
 .thinking{display:flex;align-items:center;gap:6px;color:var(--tx3);font-size:13px;font-style:italic;}
@@ -1693,15 +1699,79 @@ function fill(t){const e=document.getElementById('msg-in');e.value=t;ar(e);e.foc
 function toast(msg,type,dur=2800){const e=document.getElementById('toast');const safeMsg=(type==='err'?translateErrorMessage(msg):msg);e.textContent=safeMsg;e.className='show'+(type==='err'?' err':'');setTimeout(()=>e.className='',dur);}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function md(text){
-  let t=esc(text);
-  t=t.replace(/```(\w*)\n?([\s\S]*?)```/g,(_,l,c)=>'<pre><code>'+c.trim()+'</code></pre>');
-  t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
-  t=t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-  t=t.replace(/\*(.+?)\*/g,'<em>$1</em>');
-  t=t.replace(/^#{1,3} (.+)$/gm,'<strong>$1</strong>');
-  t=t.replace(/^- (.+)$/gm,'&bull; $1');
-  t=t.split(/\n\n+/).map(p=>'<p>'+p.replace(/\n/g,'<br>')+'</p>').join('');
-  return t;
+  const raw=String(text||'').replace(/\r\n?/g,'\n');
+  const blocks=[];
+  const codeStore=[];
+  const pushParagraph=(content)=>{
+    const safe=content.trim();
+    if(!safe) return;
+    blocks.push('<p>'+inlineMd(safe).replace(/\n/g,'<br>')+'</p>');
+  };
+  const inlineMd=(s)=>esc(s)
+    .replace(/&lt;br\s*\/?&gt;/gi,'<br>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>');
+  const looksLikeTableRow=(line)=>line.trim().startsWith('|')&&line.trim().endsWith('|');
+  const isTableSeparator=(line)=>{
+    const parts=line.trim().split('|').slice(1,-1).map(p=>p.trim());
+    return parts.length>0&&parts.every(p=>/^:?-{3,}:?$/.test(p));
+  };
+  const parseTable=(lines)=>{
+    const rows=lines.map(l=>l.trim().split('|').slice(1,-1).map(c=>inlineMd(c.trim())));
+    if(rows.length<2||!isTableSeparator(lines[1])) return null;
+    const head=rows[0];
+    const body=rows.slice(2);
+    const th=head.map(c=>`<th>${c}</th>`).join('');
+    const tr=body.map(r=>`<tr>${head.map((_,i)=>`<td>${r[i]||''}</td>`).join('')}</tr>`).join('');
+    return `<div class="tbl-wrap"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+  };
+
+  let t=raw.replace(/```(\w*)\n?([\s\S]*?)```/g,(_,l,c)=>{
+    const token=`@@CODE${codeStore.length}@@`;
+    codeStore.push('<pre><code>'+esc(c.trim())+'</code></pre>');
+    return token;
+  });
+
+  const lines=t.split('\n');
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(!line.trim()){blocks.push('');continue;}
+    const codeToken=line.trim().match(/^@@CODE(\d+)@@$/);
+    if(codeToken){blocks.push(codeStore[Number(codeToken[1])]);continue;}
+    if(looksLikeTableRow(line)&&looksLikeTableRow(lines[i+1]||'')){
+      const chunk=[line];
+      let j=i+1;
+      while(j<lines.length&&looksLikeTableRow(lines[j])){chunk.push(lines[j]);j++;}
+      const table=parseTable(chunk);
+      if(table){blocks.push(table);i=j-1;continue;}
+    }
+    if(/^#{1,3} /.test(line.trim())){blocks.push('<p><strong>'+inlineMd(line.trim().replace(/^#{1,3}\s+/,''))+'</strong></p>');continue;}
+    if(/^\d+\.\s+/.test(line.trim())||/^- /.test(line.trim())){
+      const ordered=/^\d+\.\s+/.test(line.trim());
+      const tag=ordered?'ol':'ul';
+      const items=[];
+      let j=i;
+      while(j<lines.length){
+        const m=ordered?lines[j].trim().match(/^\d+\.\s+(.+)$/):lines[j].trim().match(/^- (.+)$/);
+        if(!m) break;
+        items.push('<li>'+inlineMd(m[1])+'</li>');
+        j++;
+      }
+      blocks.push(`<${tag}>${items.join('')}</${tag}>`);
+      i=j-1;
+      continue;
+    }
+    let paragraph=line;
+    let j=i+1;
+    while(j<lines.length&&lines[j].trim()&&!/^#{1,3}\s/.test(lines[j].trim())&&!/^\d+\.\s+/.test(lines[j].trim())&&!/^- /.test(lines[j].trim())&&!looksLikeTableRow(lines[j])&&!/^@@CODE\d+@@$/.test(lines[j].trim())){
+      paragraph+='\n'+lines[j];
+      j++;
+    }
+    pushParagraph(paragraph);
+    i=j-1;
+  }
+  return blocks.filter(Boolean).join('');
 }
 
 // --- INIT ---
