@@ -714,17 +714,28 @@ async function doLogin() {
     const data = await readApiPayload(r);
     if (!r.ok) throw new Error(data.detail || 'Erro ao autenticar');
     if (isReg) {
-      errEl.textContent = data.message || 'Cadastro realizado! Verifique seu email e confirme a conta antes de entrar.';
-      errEl.style.display='block';
-      S.pendingConfirmationEmail = email;
-      save();
-      if(infoEl){
-        infoEl.textContent=`Enviamos um email de confirmação para ${email}. Após confirmar, volte aqui e faça login.`;
-        infoEl.style.display='block';
+      const requiresConfirm = data.requires_email_confirmation !== false;
+      if (requiresConfirm) {
+        errEl.textContent = data.message || 'Cadastro realizado! Verifique seu email e confirme a conta antes de entrar.';
+        errEl.style.display='block';
+        S.pendingConfirmationEmail = email;
+        save();
+        if(infoEl){
+          infoEl.textContent=`Enviamos um email de confirmação para ${email}. Após confirmar, volte aqui e faça login.`;
+          infoEl.style.display='block';
+        }
+        setLoginTab('login');
+        document.getElementById('l-pass').value = '';
+        document.getElementById('l-pass2').value = '';
+        return;
       }
-      setLoginTab('login');
-      document.getElementById('l-pass').value = '';
-      document.getElementById('l-pass2').value = '';
+      // Se confirmação por email estiver desativada no Supabase, entra direto.
+      S.token = data.access_token || null;
+      S.user = data.user || null;
+      S.pendingConfirmationEmail = '';
+      save(); saveSession();
+      await afterLogin();
+      toast('Conta criada com sucesso!');
       return;
     }
     S.token = data.access_token || null;
