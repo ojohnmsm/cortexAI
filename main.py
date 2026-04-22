@@ -1029,7 +1029,14 @@ def extract_text(filename: str, content: bytes) -> str:
         text = content.decode("utf-8", errors="ignore")
     elif ext == "csv":
         raw = content.decode("utf-8", errors="ignore")
-        reader = csv.reader(io.StringIO(raw))
+        sample = raw[:4096]
+        delimiter = ","
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            delimiter = dialect.delimiter
+        except Exception:
+            delimiter = ";" if sample.count(";") > sample.count(",") else ","
+        reader = csv.reader(io.StringIO(raw), delimiter=delimiter)
         lines = []
         for i, row in enumerate(reader):
             if i >= 5000:
@@ -1039,14 +1046,15 @@ def extract_text(filename: str, content: bytes) -> str:
     elif ext == "xlsx":
         if not HAS_OPENPYXL:
             raise HTTPException(400, "openpyxl not installed.")
-        wb = load_workbook(filename=io.BytesIO(content), read_only=True, data_only=True)
+        # data_only=False keeps formulas visible when spreadsheets do not store cached values.
+        wb = load_workbook(filename=io.BytesIO(content), read_only=True, data_only=False)
         lines = []
         for ws in wb.worksheets[:5]:
             lines.append(f"[Sheet: {ws.title}]")
             for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
                 if row_idx > 2000:
                     break
-                vals = [str(v).strip() for v in row if v is not None and str(v).strip() != ""]
+                vals = [str(v).strip() for v in row[:50] if v is not None and str(v).strip() != ""]
                 if vals:
                     lines.append(" | ".join(vals))
         text = "\n".join(lines)

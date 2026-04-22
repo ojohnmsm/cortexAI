@@ -21,7 +21,16 @@ def test_extract_text_csv_returns_rows():
     assert "1, 2" in out
 
 
+def test_extract_text_csv_autodetects_semicolon_delimiter():
+    payload = "a;b\n1;2\n".encode("utf-8")
+    out = main.extract_text("teste.csv", payload)
+    assert "a, b" in out
+    assert "1, 2" in out
+
+
 def test_extract_text_xlsx_uses_openpyxl_when_available(monkeypatch):
+    seen = {"data_only": None}
+
     class _FakeWS:
         title = "Dados"
 
@@ -33,11 +42,13 @@ def test_extract_text_xlsx_uses_openpyxl_when_available(monkeypatch):
         worksheets = [_FakeWS()]
 
     def _fake_load_workbook(filename=None, read_only=True, data_only=True):
+        seen["data_only"] = data_only
         return _FakeWB()
 
     monkeypatch.setattr(main, "HAS_OPENPYXL", True)
     monkeypatch.setattr(main, "load_workbook", _fake_load_workbook)
     out = main.extract_text("planilha.xlsx", b"fake-xlsx-content")
+    assert seen["data_only"] is False
     assert "[Sheet: Dados]" in out
     assert "Coluna A | Coluna B" in out
 
