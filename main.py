@@ -1760,6 +1760,22 @@ class AuthRequest(BaseModel):
 REGISTER_EMAIL_NOTICE = "Conta criada. Confirme o cadastro no email informado antes de fazer login."
 
 
+def classify_supabase_auth_error(exc: Exception) -> tuple[int, str]:
+    msg = str(exc or "")
+    low = msg.lower()
+    if "email not confirmed" in low or ("confirm" in low and "email" in low):
+        return 403, "Email not confirmed. Please confirm your account before logging in."
+    if "already" in low and ("registered" in low or "exists" in low):
+        return 409, "User already registered."
+    if "429" in low or "rate limit" in low or "too many requests" in low:
+        return 429, "Too many requests for signup/login. Please wait a few minutes and try again."
+    if "password should contain" in low or "weak password" in low:
+        return 400, "Password should contain uppercase, lowercase, number, special character, and be at least 8 characters."
+    if "invalid login credentials" in low:
+        return 401, "Invalid email or password."
+    return 400, "Registration/Login error."
+
+
 @app.post("/api/auth/logout")
 async def logout(response: Response):
     response.delete_cookie("access_token", path="/")
@@ -1776,10 +1792,11 @@ async def login(req: AuthRequest, request: Request, response: Response):
         session = resp.session
         user_id = resp.user.id
     except Exception as exc:
-        msg = str(exc or "").lower()
-        if "email not confirmed" in msg or ("confirm" in msg and "email" in msg):
-            raise HTTPException(403, "Email not confirmed. Please confirm your account before logging in.")
-        raise HTTPException(401, "Invalid email or password.")
+        status, detail = classify_supabase_auth_error(exc)
+        if status == 400:
+            status = 401
+            detail = "Invalid email or password."
+        raise HTTPException(status, detail)
 
     if not session or not session.access_token:
         raise HTTPException(403, "Email not confirmed. Please confirm your account before logging in.")
@@ -1831,10 +1848,11 @@ async def register(req: AuthRequest, request: Request, response: Response):
     except HTTPException:
         raise
     except Exception as exc:
-        msg = str(exc or "").lower()
-        if "already" in msg and ("registered" in msg or "exists" in msg):
-            raise HTTPException(409, "User already registered.")
-        raise HTTPException(400, "Registration error.")
+        status, detail = classify_supabase_auth_error(exc)
+        if status in (401, 403):
+            # keep registration messaging explicit
+            raise HTTPException(400, "Registration failed. Please check your data and try again.")
+        raise HTTPException(status, detail)
 
     # Profile created by trigger; fetch it
     import time
