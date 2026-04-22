@@ -6,6 +6,8 @@ supabase==2.4.6
 pdfplumber==0.11.9
 python-docx==1.1.2
 python-pptx==1.0.2
+openpyxl==3.1.5
+xlrd==2.0.1
 pydantic==2.7.1
 starlette==0.47.2
 pytest==9.0.3

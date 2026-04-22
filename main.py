@@ -6,6 +6,7 @@ import logging
 import time
 import hashlib
 import zipfile
+import csv
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from collections import defaultdict, deque
@@ -38,6 +39,18 @@ try:
     HAS_PPTX = True
 except ImportError:
     HAS_PPTX = False
+
+try:
+    from openpyxl import load_workbook
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
+
+try:
+    import xlrd
+    HAS_XLRD = True
+except ImportError:
+    HAS_XLRD = False
 
 try:
     import supabase as sb
@@ -715,6 +728,10 @@ ALLOWED_CHAT_DOC_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "text/plain",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/csv",
+    "application/csv",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 MAX_CHAT_IMAGE_BYTES = 3 * 1024 * 1024
 MAX_CHAT_DOC_BYTES = 10 * 1024 * 1024
@@ -724,6 +741,7 @@ MAGIC_SIGNATURES = {
     "png": b"\x89PNG\r\n\x1a\n",
     "jpg": b"\xff\xd8\xff",
     "webp_riff": b"RIFF",
+    "xls_ole": b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1",
 }
 
 
@@ -837,6 +855,15 @@ def is_pptx(content: bytes) -> bool:
         return False
 
 
+def is_xlsx(content: bytes) -> bool:
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            names = set(zf.namelist())
+            return "[Content_Types].xml" in names and any(name.startswith("xl/") for name in names)
+    except Exception:
+        return False
+
+
 def validate_file_signature(filename: str, content_type: str, content: bytes):
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     ct = (content_type or "").lower()
@@ -863,6 +890,20 @@ def validate_file_signature(filename: str, content_type: str, content: bytes):
             content[:50000].decode("utf-8")
         except UnicodeDecodeError:
             raise HTTPException(400, "TXT must be valid UTF-8 text.")
+    elif ext == "csv":
+        try:
+            content[:50000].decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                content[:50000].decode("latin-1")
+            except UnicodeDecodeError:
+                raise HTTPException(400, "CSV must be valid UTF-8 or Latin-1 text.")
+    elif ext == "xlsx":
+        if not is_xlsx(content):
+            raise HTTPException(400, "Invalid XLSX file signature.")
+    elif ext == "xls":
+        if not content.startswith(MAGIC_SIGNATURES["xls_ole"]):
+            raise HTTPException(400, "Invalid XLS file signature.")
     else:
         raise HTTPException(400, f"Unsupported file extension: {ext}")
 
@@ -986,6 +1027,43 @@ def extract_text(filename: str, content: bytes) -> str:
                     text += shape.text + "\n"
     elif ext == "txt":
         text = content.decode("utf-8", errors="ignore")
+    elif ext == "csv":
+        raw = content.decode("utf-8", errors="ignore")
+        reader = csv.reader(io.StringIO(raw))
+        lines = []
+        for i, row in enumerate(reader):
+            if i >= 5000:
+                break
+            lines.append(", ".join(str(c) for c in row if str(c).strip() != ""))
+        text = "\n".join(x for x in lines if x.strip())
+    elif ext == "xlsx":
+        if not HAS_OPENPYXL:
+            raise HTTPException(400, "openpyxl not installed.")
+        wb = load_workbook(filename=io.BytesIO(content), read_only=True, data_only=True)
+        lines = []
+        for ws in wb.worksheets[:5]:
+            lines.append(f"[Sheet: {ws.title}]")
+            for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+                if row_idx > 2000:
+                    break
+                vals = [str(v).strip() for v in row if v is not None and str(v).strip() != ""]
+                if vals:
+                    lines.append(" | ".join(vals))
+        text = "\n".join(lines)
+    elif ext == "xls":
+        if not HAS_XLRD:
+            raise HTTPException(400, "xlrd not installed.")
+        wb = xlrd.open_workbook(file_contents=content)
+        lines = []
+        for sh in wb.sheets()[:5]:
+            lines.append(f"[Sheet: {sh.name}]")
+            max_rows = min(sh.nrows, 2000)
+            for r in range(max_rows):
+                vals = [str(sh.cell_value(r, c)).strip() for c in range(sh.ncols)]
+                vals = [v for v in vals if v]
+                if vals:
+                    lines.append(" | ".join(vals))
+        text = "\n".join(lines)
     else:
         raise HTTPException(400, "Unsupported format: " + ext)
     return text.strip()
