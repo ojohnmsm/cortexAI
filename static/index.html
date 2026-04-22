@@ -39,6 +39,7 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .login-btn{width:100%;background:var(--vg);color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-family:'ValeSans',sans-serif;font-weight:700;cursor:pointer;transition:background .15s;margin-top:4px;}
 .login-btn:hover{background:#005e5b;}
 .login-err{background:rgba(192,48,94,.08);border:1px solid rgba(192,48,94,.3);color:var(--vc);padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;display:none;}
+.login-info{background:rgba(0,126,122,.08);border:1px solid rgba(0,126,122,.25);color:var(--vg);padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:12px;display:none;line-height:1.45;}
 
 /* SIDEBAR */
 #sidebar{width:268px;min-width:268px;background:var(--vg);display:flex;flex-direction:column;overflow:hidden;transition:width .25s,min-width .25s;flex-shrink:0;}
@@ -203,6 +204,16 @@ body{font-family:'ValeSans',sans-serif;font-weight:400;background:var(--bg);colo
 .mc p{margin-bottom:10px;}.mc p:last-child{margin-bottom:0;}
 .mc ul,.mc ol{padding-left:20px;margin-bottom:10px;}.mc li{margin-bottom:4px;}
 .mc strong{font-weight:700;}
+.mc .tbl-wrap{overflow-x:auto;margin:10px 0;border:1px solid var(--bdr);border-radius:10px;background:#fff;}
+.mc table{width:100%;border-collapse:collapse;min-width:420px;font-size:13px;line-height:1.45;}
+.mc th,.mc td{padding:8px 10px;border-bottom:1px solid var(--bdr);text-align:left;vertical-align:top;}
+.mc th{background:var(--sur2);font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--tx2);}
+.mc tbody tr:nth-child(even){background:rgba(0,126,122,.03);}
+.mc tbody tr:last-child td{border-bottom:none;}
+.msg-actions{margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.exp-btn{border:1px solid var(--bdr2);background:var(--sur2);color:var(--tx2);border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;}
+.exp-btn:hover{border-color:var(--vg);color:var(--vg);}
+.exp-btn:disabled{opacity:.65;cursor:not-allowed;}
 .msg.user .mc{background:var(--vg);color:#fff;border-radius:4px 14px 14px 14px;padding:10px 14px;display:inline-block;max-width:100%;}
 .msg.user .mc code{background:rgba(255,255,255,.15);border-color:transparent;color:#fff;}
 .thinking{display:flex;align-items:center;gap:6px;color:var(--tx3);font-size:13px;font-style:italic;}
@@ -325,6 +336,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
       <div class="ltab" onclick="setLoginTab('register')">Criar conta</div>
     </div>
     <div id="login-err" class="login-err"></div>
+    <div id="login-info" class="login-info"></div>
     <div class="lfield"><label>E-mail</label><input type="text" id="l-email" placeholder="seu@email.com" /></div>
     <div class="lfield"><label>Senha</label><input type="password" id="l-pass" placeholder="Senha" onkeydown="if(event.key==='Enter')doLogin()" /></div>
     <div class="lfield" id="l-pass2-wrap" style="display:none"><label>Confirmar senha</label><input type="password" id="l-pass2" placeholder="Repita a senha" /></div>
@@ -563,6 +575,7 @@ let S = {
   kbUploadInProgress:false,
   token:null, user:null,
   loginTab:'login',
+  pendingConfirmationEmail:'',
 };
 
 function sanitizePersistedState(state){
@@ -666,6 +679,12 @@ function setLoginTab(t) {
   document.getElementById('l-pass2-wrap').style.display = t==='register' ? '' : 'none';
   document.getElementById('login-btn').textContent = t==='register' ? 'Criar conta' : 'Entrar';
   document.getElementById('login-err').style.display='none';
+  const infoEl=document.getElementById('login-info');
+  if(infoEl && t==='register') infoEl.style.display='none';
+  if(infoEl && t==='login' && S.pendingConfirmationEmail){
+    infoEl.textContent=`Conta criada para ${S.pendingConfirmationEmail}. Confirme o email antes de entrar.`;
+    infoEl.style.display='block';
+  }
   updatePasswordHints();
 }
 
@@ -673,7 +692,9 @@ async function doLogin() {
   const email = document.getElementById('l-email').value.trim();
   const pass = document.getElementById('l-pass').value;
   const errEl = document.getElementById('login-err');
+  const infoEl = document.getElementById('login-info');
   errEl.style.display='none';
+  if(infoEl) infoEl.style.display='none';
   if (!email || !pass) { errEl.textContent='Preencha email e senha.'; errEl.style.display='block'; return; }
   const isReg = S.loginTab==='register';
   if (isReg) {
@@ -695,6 +716,12 @@ async function doLogin() {
     if (isReg) {
       errEl.textContent = data.message || 'Cadastro realizado! Verifique seu email e confirme a conta antes de entrar.';
       errEl.style.display='block';
+      S.pendingConfirmationEmail = email;
+      save();
+      if(infoEl){
+        infoEl.textContent=`Enviamos um email de confirmação para ${email}. Após confirmar, volte aqui e faça login.`;
+        infoEl.style.display='block';
+      }
       setLoginTab('login');
       document.getElementById('l-pass').value = '';
       document.getElementById('l-pass2').value = '';
@@ -702,10 +729,20 @@ async function doLogin() {
     }
     S.token = data.access_token || null;
     S.user = data.user;
+    S.pendingConfirmationEmail = '';
     save(); saveSession();
     await afterLogin();
   } catch(err) {
-    errEl.textContent = translateAuthError(err.message);
+    const translated = translateAuthError(err.message);
+    if (!isReg && S.pendingConfirmationEmail && email.toLowerCase() === S.pendingConfirmationEmail.toLowerCase()) {
+      errEl.textContent = 'Seu cadastro existe, mas ainda precisa confirmar o email. Verifique sua caixa de entrada (e spam) e depois tente novamente.';
+      if(infoEl){
+        infoEl.textContent='Dica: procure pelo email de confirmação do Supabase e clique no link para ativar a conta.';
+        infoEl.style.display='block';
+      }
+    } else {
+      errEl.textContent = translated;
+    }
     errEl.style.display='block';
   }
   document.getElementById('login-btn').textContent = isReg ? 'Criar conta' : 'Entrar';
@@ -1175,13 +1212,13 @@ function renderMsgs(msgs){
   const w=document.getElementById('msgs'),e=document.getElementById('empty');
   if(!msgs.length){showEmpty();return;}
   e.style.display='none';w.style.display='flex';
-  w.innerHTML=msgs.map(msgHTML).join('');scrollBot();
+  w.innerHTML=msgs.map((m,i)=>msgHTML(m,i)).join('');scrollBot();
 }
 function showEmpty(){
   document.getElementById('empty').style.display='';
   const w=document.getElementById('msgs');w.style.display='none';w.innerHTML='';
 }
-function msgHTML(m){
+function msgHTML(m,msgIndex=0){
   const isU=m.role==='user',p=m.provider||'openai';
   const providerName = {openai:'ChatGPT', claude:'Claude', gemini:'Gemini', copilot:'Copilot'};
   const providerLabel = {openai:'GPT', claude:'CLA', gemini:'GEM', copilot:'COP'};
@@ -1191,10 +1228,22 @@ function msgHTML(m){
   const time=m.time?new Date(m.time).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
   const kb=m.usedKB?'<span class="kb-tag">&#128218; base</span>':'';
   const tk=m.tokens?`<span style="font-size:10px;color:var(--tx3)">${m.tokens}t</span>`:'';
-  const body=isU?`<div class="mc">${esc(m.content)}</div>`:`<div class="mc">${md(m.content)}</div>`;
+  let content=isU?esc(m.content):md(m.content);
+  const requestedExport=!isU&&!!m.excelExportEnabled;
+  let hasTable=!isU&&content.includes('<table>');
+  if(requestedExport && !hasTable){
+    const csvRows=extractCsvRows(m.content);
+    if(csvRows){
+      content += `<p><strong>Tabela convertida automaticamente do CSV para exportação:</strong></p>${csvRowsToTableHtml(csvRows)}`;
+      hasTable=true;
+    }
+  }
+  const enableExport=hasTable&&requestedExport;
+  const body=`<div class="mc">${content}</div>`;
+  const actions=enableExport?`<div class="msg-actions"><button class="exp-btn" onclick="exportMsgTable(this,${msgIndex})" aria-label="Exportar tabela para Excel">Gerar Excel</button></div>`:'';
   return `<div class="msg${isU?' user':''}">
     <div class="av ${ac}">${al}</div>
-    <div class="mb"><div class="mm">${who} <span>${time}</span>${kb}${tk}</div>${body}</div></div>`;
+    <div class="mb"><div class="mm">${who} <span>${time}</span>${kb}${tk}</div>${body}${actions}</div></div>`;
 }
 function appendMsg(m){
   document.getElementById('empty').style.display='none';
@@ -1218,6 +1267,45 @@ function updateThinkingLabel(label){
 }
 function rmThink(){const e=document.getElementById('tk');if(e)e.remove();}
 function scrollBot(){const w=document.getElementById('msgs-wrap');setTimeout(()=>w.scrollTop=w.scrollHeight,50);}
+function exportMsgTable(btn,msgIndex){
+  const scope=btn.closest('.mb');
+  const table=scope?scope.querySelector('.mc table'):null;
+  if(!table){ toast('Nenhuma tabela encontrada para exportar.','err'); return; }
+  const oldLabel=btn.textContent;
+  btn.disabled=true;
+  btn.textContent='Gerando Excel...';
+  return (async()=>{
+    try{
+      const rows=[...table.querySelectorAll('tr')].map(tr=>
+        [...tr.querySelectorAll('th,td')].map(td=>(td.textContent||'').replace(/\s+/g,' ').trim())
+      ).filter(r=>r.some(c=>c));
+      if(!rows.length) throw new Error('Tabela sem dados para exportação.');
+      const r=await authFetch('/api/chat/export/xlsx',{
+        method:'POST',
+        body:JSON.stringify({rows,file_name:`relatorio-${Number(msgIndex)+1}`}),
+      });
+      if(!r.ok){
+        const data=await r.json().catch(()=>({}));
+        throw new Error(data.detail||'Falha ao gerar arquivo.');
+      }
+      const blob=await r.blob();
+      const link=document.createElement('a');
+      const ts=new Date().toISOString().replace(/[:T]/g,'-').slice(0,16);
+      link.href=URL.createObjectURL(blob);
+      link.download=`relatorio-${Number(msgIndex)+1}-${ts}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+      toast('Arquivo Excel (.xlsx) gerado com sucesso!');
+    }catch(e){
+      toast('Erro ao gerar Excel: '+(e?.message||'falha desconhecida'),'err');
+    }finally{
+      btn.disabled=false;
+      btn.textContent=oldLabel;
+    }
+  })();
+}
 
 
 function currentChatAttachmentIds(){
@@ -1289,6 +1377,7 @@ async function removeChatAttachment(id){
 async function send(){
   const input=document.getElementById('msg-in');
   const text=input.value.trim();
+  const excelRequested=shouldOfferExcelExport(text);
   const attachmentIds=currentChatAttachmentIds();
   if(!text && !attachmentIds.length)return;
   if(S.chatUploadInProgress){toast('Aguarde o envio do anexo terminar.','err');return;}
@@ -1325,7 +1414,7 @@ async function send(){
     const data=await readApiPayload(r);
     if(!r.ok) throw new Error(data.detail||'Erro ao enviar');
     rmThink();
-    const aMsg={role:'assistant',content:data.reply||'',time:Date.now(),provider:S.provider,model:effectiveModel,usedKB:!!data.used_knowledge,tokens:data.tokens?.total||null};
+    const aMsg={role:'assistant',content:data.reply||'',time:Date.now(),provider:S.provider,model:effectiveModel,usedKB:!!data.used_knowledge,tokens:data.tokens?.total||null,excelExportEnabled:excelRequested};
     chat.messages.push(aMsg);
     chat.updatedAt=Date.now();
     await refreshAutoTitle(chat);
@@ -1692,16 +1781,128 @@ function ar(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,
 function fill(t){const e=document.getElementById('msg-in');e.value=t;ar(e);e.focus();}
 function toast(msg,type,dur=2800){const e=document.getElementById('toast');const safeMsg=(type==='err'?translateErrorMessage(msg):msg);e.textContent=safeMsg;e.className='show'+(type==='err'?' err':'');setTimeout(()=>e.className='',dur);}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function shouldOfferExcelExport(text){
+  const t=String(text||'').toLowerCase();
+  if(!t.trim()) return false;
+  const patterns=[
+    /\bplanilha\b/,
+    /\bexcel\b/,
+    /\bxlsx\b/,
+    /\bexport(ar|e)?\b.*\b(planilha|excel)\b/,
+    /\bger(ar|e)\b.*\b(planilha|excel)\b/,
+    /\bmont(ar|e)\b.*\bplanilha\b/,
+  ];
+  return patterns.some(rx=>rx.test(t));
+}
+function parseCsvLine(line){
+  const out=[]; let cur=''; let inQuotes=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch==='"'){
+      if(inQuotes && line[i+1]==='"'){ cur+='"'; i++; continue; }
+      inQuotes=!inQuotes; continue;
+    }
+    if(ch===',' && !inQuotes){ out.push(cur.trim()); cur=''; continue; }
+    cur+=ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+function extractCsvRows(text){
+  const src=String(text||'');
+  const blockMatch=src.match(/```(?:csv)?\s*\n([\s\S]*?)```/i);
+  const candidate=(blockMatch?blockMatch[1]:src).trim();
+  const lines=candidate.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(lines.length<2) return null;
+  const commaRich=lines.filter(l=>(l.match(/,/g)||[]).length>=1).length;
+  if(commaRich<2) return null;
+  const rows=lines.map(parseCsvLine);
+  const width=Math.max(...rows.map(r=>r.length));
+  if(width<2) return null;
+  return rows.map(r=>r.concat(Array(Math.max(0,width-r.length)).fill('')));
+}
+function csvRowsToTableHtml(rows){
+  if(!rows||rows.length<2) return '';
+  const head=rows[0];
+  const body=rows.slice(1);
+  const th=head.map(c=>`<th>${esc(c)}</th>`).join('');
+  const tr=body.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('');
+  return `<div class="tbl-wrap"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+}
 function md(text){
-  let t=esc(text);
-  t=t.replace(/```(\w*)\n?([\s\S]*?)```/g,(_,l,c)=>'<pre><code>'+c.trim()+'</code></pre>');
-  t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
-  t=t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-  t=t.replace(/\*(.+?)\*/g,'<em>$1</em>');
-  t=t.replace(/^#{1,3} (.+)$/gm,'<strong>$1</strong>');
-  t=t.replace(/^- (.+)$/gm,'&bull; $1');
-  t=t.split(/\n\n+/).map(p=>'<p>'+p.replace(/\n/g,'<br>')+'</p>').join('');
-  return t;
+  const raw=String(text||'').replace(/\r\n?/g,'\n');
+  const blocks=[];
+  const codeStore=[];
+  const pushParagraph=(content)=>{
+    const safe=content.trim();
+    if(!safe) return;
+    blocks.push('<p>'+inlineMd(safe).replace(/\n/g,'<br>')+'</p>');
+  };
+  const inlineMd=(s)=>esc(s)
+    .replace(/&lt;br\s*\/?&gt;/gi,'<br>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>');
+  const looksLikeTableRow=(line)=>line.trim().startsWith('|')&&line.trim().endsWith('|');
+  const isTableSeparator=(line)=>{
+    const parts=line.trim().split('|').slice(1,-1).map(p=>p.trim());
+    return parts.length>0&&parts.every(p=>/^:?-{3,}:?$/.test(p));
+  };
+  const parseTable=(lines)=>{
+    const rows=lines.map(l=>l.trim().split('|').slice(1,-1).map(c=>inlineMd(c.trim())));
+    if(rows.length<2||!isTableSeparator(lines[1])) return null;
+    const head=rows[0];
+    const body=rows.slice(2);
+    const th=head.map(c=>`<th>${c}</th>`).join('');
+    const tr=body.map(r=>`<tr>${head.map((_,i)=>`<td>${r[i]||''}</td>`).join('')}</tr>`).join('');
+    return `<div class="tbl-wrap"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+  };
+
+  let t=raw.replace(/```(\w*)\n?([\s\S]*?)```/g,(_,l,c)=>{
+    const token=`@@CODE${codeStore.length}@@`;
+    codeStore.push('<pre><code>'+esc(c.trim())+'</code></pre>');
+    return token;
+  });
+
+  const lines=t.split('\n');
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(!line.trim()){blocks.push('');continue;}
+    const codeToken=line.trim().match(/^@@CODE(\d+)@@$/);
+    if(codeToken){blocks.push(codeStore[Number(codeToken[1])]);continue;}
+    if(looksLikeTableRow(line)&&looksLikeTableRow(lines[i+1]||'')){
+      const chunk=[line];
+      let j=i+1;
+      while(j<lines.length&&looksLikeTableRow(lines[j])){chunk.push(lines[j]);j++;}
+      const table=parseTable(chunk);
+      if(table){blocks.push(table);i=j-1;continue;}
+    }
+    if(/^#{1,3} /.test(line.trim())){blocks.push('<p><strong>'+inlineMd(line.trim().replace(/^#{1,3}\s+/,''))+'</strong></p>');continue;}
+    if(/^\d+\.\s+/.test(line.trim())||/^- /.test(line.trim())){
+      const ordered=/^\d+\.\s+/.test(line.trim());
+      const tag=ordered?'ol':'ul';
+      const items=[];
+      let j=i;
+      while(j<lines.length){
+        const m=ordered?lines[j].trim().match(/^\d+\.\s+(.+)$/):lines[j].trim().match(/^- (.+)$/);
+        if(!m) break;
+        items.push('<li>'+inlineMd(m[1])+'</li>');
+        j++;
+      }
+      blocks.push(`<${tag}>${items.join('')}</${tag}>`);
+      i=j-1;
+      continue;
+    }
+    let paragraph=line;
+    let j=i+1;
+    while(j<lines.length&&lines[j].trim()&&!/^#{1,3}\s/.test(lines[j].trim())&&!/^\d+\.\s+/.test(lines[j].trim())&&!/^- /.test(lines[j].trim())&&!looksLikeTableRow(lines[j])&&!/^@@CODE\d+@@$/.test(lines[j].trim())){
+      paragraph+='\n'+lines[j];
+      j++;
+    }
+    pushParagraph(paragraph);
+    i=j-1;
+  }
+  return blocks.filter(Boolean).join('');
 }
 
 // --- INIT ---
