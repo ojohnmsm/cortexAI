@@ -225,6 +225,18 @@ def should_set_secure_cookie(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
+def get_available_providers(profile: Optional[dict] = None) -> List[str]:
+    role = str((profile or {}).get("role", "") or "").strip().lower()
+    providers = ["openai"]
+    if role in ("claude_user", "admin"):
+        providers.append("claude")
+    if GEMINI_KEY:
+        providers.append("gemini")
+    if GITHUB_MODELS_TOKEN:
+        providers.append("copilot")
+    return providers
+
+
 # ---------------------------------------------------------------
 # PYDANTIC MODELS
 # ---------------------------------------------------------------
@@ -287,18 +299,22 @@ def apply_chat_model_policy(req: ChatRequest, profile: dict) -> tuple[str, str]:
         return provider, model
 
     if provider == "gemini":
-        if profile["role"] != "admin":
-            raise HTTPException(403, "Gemini access is available to admin users only.")
-        if model not in get_allowed_gemini_models_for_admin():
-            raise HTTPException(400, "Gemini model not allowed for admin selection.")
-        return "gemini", model
+        if not GEMINI_KEY:
+            raise HTTPException(400, "Gemini is not configured on this server.")
+        if profile["role"] == "admin":
+            if model not in get_allowed_gemini_models_for_admin():
+                raise HTTPException(400, "Gemini model not allowed for admin selection.")
+            return "gemini", model
+        return "gemini", "gemini-2.5-flash"
 
     if provider == "copilot":
-        if profile["role"] != "admin":
-            raise HTTPException(403, "Copilot access is available to admin users only.")
-        if model not in get_allowed_copilot_models_for_admin():
-            raise HTTPException(400, "Copilot model not allowed for admin selection.")
-        return "copilot", model
+        if not GITHUB_MODELS_TOKEN:
+            raise HTTPException(400, "Copilot is not configured on this server.")
+        if profile["role"] == "admin":
+            if model not in get_allowed_copilot_models_for_admin():
+                raise HTTPException(400, "Copilot model not allowed for admin selection.")
+            return "copilot", model
+        return "copilot", "openai/gpt-4.1"
 
     if provider != "openai":
         raise HTTPException(400, "Unsupported provider.")
@@ -1104,6 +1120,7 @@ async def get_me(profile: dict = Depends(get_current_user)):
         "tokens_used": profile["tokens_used"],
         "tokens_limit": profile["tokens_limit"],
         "active": profile["active"],
+        "available_providers": get_available_providers(profile),
     }
 
 
@@ -1914,6 +1931,7 @@ async def login(req: AuthRequest, request: Request, response: Response):
             "tokens_used": profile["tokens_used"],
             "tokens_limit": profile["tokens_limit"],
             "active": profile["active"],
+            "available_providers": get_available_providers(profile),
         }
     }
 
@@ -1986,5 +2004,6 @@ async def register(req: AuthRequest, request: Request, response: Response):
             "tokens_used": 0,
             "tokens_limit": 100000,
             "active": True,
+            "available_providers": get_available_providers({"role": role}),
         }
     }

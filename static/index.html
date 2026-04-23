@@ -361,7 +361,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
     <button class="bti" onclick="openCfg()">⚙</button>
   </div>
   <div id="user-bar-wrap"></div>
-  <button class="new-btn" onclick="newChat()" title="Criar nova conversa" aria-label="Criar nova conversa"><img class="new-btn-icon" src="/static/favicon.ico" alt="" aria-hidden="true"><span class="new-btn-label">Novo chat</span></button>
+  <button class="new-btn" onclick="newChat()" title="Criar nova conversa" aria-label="Criar nova conversa">Novo chat</button>
   <div class="sb-sec">Conversas</div>
   <div class="sb-search-wrap">
     <input id="chat-search" type="text" placeholder="Buscar conversa..." oninput="setChatFilter(this.value)" aria-label="Buscar conversa por título" />
@@ -412,7 +412,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
   </div>
   <div id="msgs-wrap">
     <div id="empty">
-      <div class="ei"><img src="/static/favicon.ico" alt="CORTEX AI" style="width:30px;height:30px;object-fit:contain;border-radius:6px"></div>
+      <div class="ei"><img src="/static/favicon.ico" alt="CORTEX AI" style="width:38px;height:38px;object-fit:contain;border-radius:8px"></div>
       <div class="et">Bem-vindo ao seu assistente de trabalho</div>
       <div class="es">Faça perguntas, compare textos, use sua base de conhecimento e gere respostas profissionais com mais contexto.</div>
       <div id="empty-context" class="empty-context"></div>
@@ -510,7 +510,7 @@ textarea{resize:vertical;min-height:90px;line-height:1.6;}
     <div class="mhd"><div class="mt">&#128272; Painel Admin</div><button class="btil" onclick="cm('m-admin')">X</button></div>
     <div class="mbd">
       <div class="info-b">Gerencie usuarios, roles, limites de tokens e regras globais do chat.</div>
-      <div style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Roles: admin = acesso total (ChatGPT, Claude, Gemini e Copilot) | claude_user = acesso Claude + ChatGPT | user = apenas ChatGPT</div>
+      <div style="font-size:11px;color:var(--tx3);font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Roles: admin = acesso total e seleção de modelos | claude_user = Claude + ChatGPT + provedores habilitados | user = ChatGPT + provedores habilitados</div>
       <div id="admin-content" style="overflow-x:auto">
         <div style="font-size:13px;color:var(--tx3);font-style:italic">Carregando usuarios...</div>
       </div>
@@ -651,18 +651,23 @@ function translateAuthError(msg){
   return translateErrorMessage(msg || 'Erro ao autenticar');
 }
 function canUseProvider(provider){
-  const role = (S.user && S.user.role) || 'user';
-  if (role === 'admin') return true;
-  if (provider === 'openai') return true;
-  if (provider === 'claude') return role === 'claude_user';
-  return false;
+  let available = (S.user && Array.isArray(S.user.available_providers) && S.user.available_providers.length)
+    ? S.user.available_providers
+    : null;
+  if(!available){
+    const role = (S.user && S.user.role) || 'user';
+    available = ['openai'];
+    if(role==='admin' || role==='claude_user') available.push('claude');
+    if(role==='admin') { available.push('gemini'); available.push('copilot'); }
+  }
+  return available.includes(provider);
 }
 function updateProviderAccessControls(){
   const cfg = {
     claude: {title:'Sem acesso ao Claude. Contate o administrador.'},
     openai: {title:''},
-    gemini: {title:'Gemini disponível apenas para admin.'},
-    copilot: {title:'Copilot disponível apenas para admin.'},
+    gemini: {title:'Gemini não está habilitado para seu perfil/ambiente.'},
+    copilot: {title:'Copilot não está habilitado para seu perfil/ambiente.'},
   };
   Object.keys(cfg).forEach((provider) => {
     const btn = document.getElementById('btn-'+provider);
